@@ -24,6 +24,11 @@
   .btn-danger{background:#FEF2F2;color:#EF4444;border:1px solid #FECACA;}
   .btn-danger:hover{background:#EF4444;color:#fff;}
   .btn-sm{padding:5px 10px;font-size:12px;border-radius:6px;}
+  /* 保存状态横幅 */
+  .save-banner{max-width:1400px;margin:12px auto 0;padding:10px 16px;border-radius:10px;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+  .save-banner-ok{background:#ECFDF5;color:#047857;border:1px solid #A7F3D0;}
+  .save-banner-ls{background:#FFFBEB;color:#B45309;border:1px solid #FDE68A;}
+  .save-banner .btn{white-space:nowrap;}
   /* Tab */
   .tabs{max-width:1400px;margin:18px auto 0;padding:0 20px;display:flex;gap:8px;border-bottom:2px solid #E2E8F0;}
   .tab{padding:10px 22px;font-size:15px;font-weight:600;color:#64748B;cursor:pointer;border:none;background:none;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s;}
@@ -248,6 +253,8 @@
   </div>
 </div>
 
+<div class="save-banner hidden" id="save-banner"></div>
+
 <div class="toast" id="toast"></div>
 <script>
 /*! xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */
@@ -379,70 +386,157 @@ async function dbGetOne(db, key){
     req.onerror = e => rej(e.target.error);
   });
 }
-// 保存数据集: 优先整体一次写入; 失败则分块(每块 CHUNK_ROWS 行)写入, 主记录只存 meta+块列表
+// ---------- localStorage 备胎通道(列式 + gzip 压缩) ----------
+// 部分浏览器环境(无痕/内置浏览器/webview) IndexedDB 不可靠, 用 localStorage 兜底,
+// 刷新后双通道读取, 只要任一通道存活数据就不丢
+const LS_KEY = 'kw_analysis_ls_v1';
+function lsCols(dataset){
+  const items = dataset.items;
+  const cols = { sku:[], kw:[], spend:[], rev:[], drev:[], clicks:[], orders:[], cart:[], owner:[], cat:[], short:[] };
+  for(const it of items){
+    cols.sku.push(it.sku);
+    cols.kw.push(it.kw || '');
+    cols.spend.push(it.spend); cols.rev.push(it.rev); cols.drev.push(it.drev);
+    cols.clicks.push(it.clicks); cols.orders.push(it.orders); cols.cart.push(it.cart);
+    cols.owner.push(it.owner); cols.cat.push(it.cat); cols.short.push(it.short || '');
+  }
+  return cols;
+}
+function lsFromCols(cols){
+  const n = cols.sku.length, items = [];
+  for(let i=0;i<n;i++){
+    items.push({ sku:cols.sku[i], kw:cols.kw[i] || '', spend:cols.spend[i], rev:cols.rev[i], drev:cols.drev[i],
+      clicks:cols.clicks[i], orders:cols.orders[i], cart:cols.cart[i], owner:cols.owner[i], cat:cols.cat[i], short:cols.short[i] || '' });
+  }
+  return items;
+}
+// 字节数组 <-> base64 (兼容大字符串)
+function bytesToB64(u8){
+  let bin = '';
+  const CH = 0x8000;
+  for(let i=0;i<u8.length;i+=CH){ bin += String.fromCharCode.apply(null, u8.subarray(i, i+CH)); }
+  return btoa(bin);
+}
+function b64ToBytes(b64){
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+async function lsSave(dataset){
+  try{
+    const obj = {v:2, createdAt: dataset.createdAt, meta: dataset.meta, cols: lsCols(dataset)};
+    const json = JSON.stringify(obj);
+    // 优先 gzip 压缩(Chrome80+/FF113+/Safari16.4+), 大表可压到 1/5 体积塞进 localStorage
+    if(typeof CompressionStream !== 'undefined' && typeof DecompressionStream !== 'undefined'){
+      const bytes = new TextEncoder().encode(json);
+      const cs = new CompressionStream('gzip');
+      const stream = new Blob([bytes]).stream().pipeThrough(cs);
+      const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
+      localStorage.setItem(LS_KEY, 'gz:' + bytesToB64(compressed));
+    }else{
+      localStorage.setItem(LS_KEY, 'raw:' + json);
+    }
+    return true;
+  }catch(e){ console.warn('localStorage 保存失败:', e && e.message); return false; }
+}
+async function lsLoad(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return null;
+    let obj;
+    if(raw.indexOf('gz:') === 0){
+      const u8 = b64ToBytes(raw.slice(3));
+      const ds = new DecompressionStream('gzip');
+      const stream = new Blob([u8]).stream().pipeThrough(ds);
+      const decompressed = new Uint8Array(await new Response(stream).arrayBuffer());
+      obj = JSON.parse(new TextDecoder().decode(decompressed));
+    }else if(raw.indexOf('raw:') === 0){
+      obj = JSON.parse(raw.slice(4));
+    }else{
+      obj = JSON.parse(raw); // 兼容旧格式
+    }
+    if(!obj || !obj.cols || !obj.cols.sku) return null;
+    return {key: DATA_KEY, createdAt: obj.createdAt, items: lsFromCols(obj.cols), meta: obj.meta};
+  }catch(e){ console.warn('localStorage 读取失败:', e && e.message); return null; }
+}
+function lsClear(){ try{ localStorage.removeItem(LS_KEY); }catch(e){} }
+// 保存数据集: IndexedDB 整体→分块, 同时写 localStorage 备胎; 返回综合状态
 async function dbPutDataset(dataset){
   const db = await openDB();
   const items = dataset.items;
   const total = items.length;
+  let idbMode = 'none';
   try{
     // 尝试整体写入
     await idbReq(db, 'readwrite', s => s.put(dataset));
-    return {mode:'single', parts: 0};
+    idbMode = 'single';
   }catch(e1){
     console.warn('整体保存失败, 尝试分块:', e1 && e1.message);
-  }
-  // 分块: 先删除旧主记录, 再逐块写入, 最后写主记录(只含 meta + partKeys)
-  try{
-    await idbReq(db, 'readwrite', s => s.delete(DATA_KEY));
-    const partKeys = [];
-    for(let i=0;i<total;i+=CHUNK_ROWS){
-      const chunk = items.slice(i, i+CHUNK_ROWS);
-      const key = DATA_KEY + '_p' + partKeys.length;
-      const partRec = {key, items: chunk};
-      await idbReq(db, 'readwrite', s => s.put(partRec));
-      partKeys.push(key);
+    try{
+      // 分块: 先删除旧主记录, 再逐块写入, 最后写主记录(只含 meta + partKeys)
+      await idbReq(db, 'readwrite', s => s.delete(DATA_KEY));
+      const partKeys = [];
+      for(let i=0;i<total;i+=CHUNK_ROWS){
+        const chunk = items.slice(i, i+CHUNK_ROWS);
+        const key = DATA_KEY + '_p' + partKeys.length;
+        const partRec = {key, items: chunk};
+        await idbReq(db, 'readwrite', s => s.put(partRec));
+        partKeys.push(key);
+      }
+      const metaRec = { key: DATA_KEY, createdAt: dataset.createdAt, chunked: true, partKeys, meta: dataset.meta };
+      await idbReq(db, 'readwrite', s => s.put(metaRec));
+      idbMode = 'chunked';
+    }catch(e2){
+      console.error('IndexedDB 分块保存也失败:', e2 && e2.message);
     }
-    const metaRec = {
-      key: DATA_KEY,
-      createdAt: dataset.createdAt,
-      chunked: true,
-      partKeys,
-      meta: dataset.meta
-    };
-    await idbReq(db, 'readwrite', s => s.put(metaRec));
-    return {mode:'chunked', parts: partKeys.length};
-  }catch(e2){
-    console.error('分块保存也失败:', e2 && e2.message);
-    throw e2;
   }
+  // localStorage 备胎(尽力而为, 大表 gzip 压缩后一般能塞进 5MB 限制)
+  const lsOk = await lsSave(dataset);
+  if(idbMode !== 'none' && !lsOk){
+    console.warn('IndexedDB 成功但 localStorage 备胎写入失败(数据量大或受限), 不影响主通道');
+  }
+  const mode = idbMode !== 'none' ? idbMode : (lsOk ? 'ls' : 'none');
+  return {mode, idb: idbMode, ls: lsOk};
 }
 async function dbGet(){
-  const db = await openDB();
-  const rec = await dbGetOne(db, DATA_KEY);
-  if(!rec) return null;
-  // 分块存储: 逐块读取合并
-  if(rec.chunked && Array.isArray(rec.partKeys) && rec.partKeys.length){
-    const all = [];
-    for(const k of rec.partKeys){
-      const part = await dbGetOne(db, k);
-      if(part && Array.isArray(part.items)){
-        for(let i=0;i<part.items.length;i++) all.push(part.items[i]);
+  let rec = null;
+  try{
+    const db = await openDB();
+    rec = await dbGetOne(db, DATA_KEY);
+    if(rec && rec.chunked && Array.isArray(rec.partKeys) && rec.partKeys.length){
+      const all = [];
+      for(const k of rec.partKeys){
+        const part = await dbGetOne(db, k);
+        if(part && Array.isArray(part.items)){
+          for(let i=0;i<part.items.length;i++) all.push(part.items[i]);
+        }
       }
+      rec = {key: DATA_KEY, createdAt: rec.createdAt, items: all, meta: rec.meta};
     }
-    return {key: DATA_KEY, createdAt: rec.createdAt, items: all, meta: rec.meta};
+  }catch(e){
+    console.warn('IndexedDB 读取失败, 尝试 localStorage:', e && e.message);
+    rec = null;
+  }
+  // IndexedDB 无数据时, 从 localStorage 备胎恢复
+  if(!rec){
+    const ls = await lsLoad();
+    if(ls) return ls;
   }
   return rec;
 }
 async function dbClear(){
-  const db = await openDB();
-  // 先查主记录, 若有分块则连同分块一起删除
-  const rec = await dbGetOne(db, DATA_KEY);
-  await idbReq(db, 'readwrite', s => {
-    if(rec && Array.isArray(rec.partKeys)){
-      for(const k of rec.partKeys) s.delete(k);
-    }
-    s.delete(DATA_KEY);
-  });
+  try{
+    const db = await openDB();
+    const rec = await dbGetOne(db, DATA_KEY);
+    await idbReq(db, 'readwrite', s => {
+      if(rec && Array.isArray(rec.partKeys)){
+        for(const k of rec.partKeys) s.delete(k);
+      }
+      s.delete(DATA_KEY);
+    });
+  }catch(e){ console.warn('IndexedDB 清空失败:', e && e.message); }
+  lsClear();
 }
 
 /* ---------- 全局状态 ---------- */
@@ -726,7 +820,7 @@ async function doImport(){
       const savedCount = verify && verify.items ? verify.items.length : 0;
       if(savedCount !== total){
         console.warn(`保存校验不一致: 预期 ${total} 行, 实际 ${savedCount} 行`);
-        if(r.mode === 'single'){
+        if(r.idb === 'single'){
           // 整体写成功但校验失败(异常情况), 强制分块重写
           const r2 = await dbPutDataset(dataset);
           saveMode = r2.mode;
@@ -734,26 +828,36 @@ async function doImport(){
           const savedCount2 = verify2 && verify2.items ? verify2.items.length : 0;
           if(savedCount2 !== total){
             toast(`⚠️ 本地保存不完整(浏览器存储受限), 本次会话内数据完整可用; 刷新后需重新导入。建议清理浏览器缓存/网站数据后重试`);
-          }else{
-            toast(`✅ 已改用分块保存(${r2.parts} 块), 数据完整`);
+          }else if(r2.idb === 'chunked'){
+            toast(`✅ 已改用分块保存, 数据完整`);
+          }else if(r2.ls){
+            toast(`✅ 已保存到浏览器备胎存储(localStorage), 数据完整`);
           }
+        }else if(r.ls){
+          toast(`✅ 已保存到浏览器备胎存储(localStorage), 数据完整`);
         }else{
           toast(`⚠️ 本地保存不完整(浏览器存储受限), 本次会话内数据完整可用; 刷新后需重新导入`);
         }
-      }else if(r.mode === 'chunked'){
-        toast(`✅ 已分块保存(${r.parts} 块), 数据完整`);
+      }else if(r.idb === 'chunked'){
+        toast(`✅ 已分块保存, 数据完整`);
+      }else if(r.mode === 'ls'){
+        toast(`✅ 已保存到浏览器备胎存储(localStorage), 数据完整`);
       }
     }catch(saveErr){
-      // 整体+分块都失败: 不阻断使用, 数据在内存中本次会话可用
-      console.warn('IndexedDB 保存失败:', saveErr);
+      // 保存异常不阻断使用, 数据在内存中本次会话可用
+      console.warn('保存失败:', saveErr);
       toast('⚠️ 浏览器存储空间不足, 未能持久保存到本地。本次会话内仍可正常查看; 刷新后需重新导入。建议: ①清理浏览器缓存/网站数据 ②导出报告备份');
       await new Promise(r=>setTimeout(r, 2000));
     }
     closeImportModal();
     if(saveMode==='none'){
       toast('🎉 数据导入成功(仅本次会话, 未持久化), 共 ' + fmtInt(total) + ' 行');
+    }else if(saveMode==='ls'){
+      toast('🎉 数据导入成功, 共 ' + fmtInt(total) + ' 行');
+      showSaveBanner('localStorage');
     }else{
       toast('🎉 数据导入成功, 共 ' + fmtInt(total) + ' 行');
+      showSaveBanner('indexeddb');
     }
     pendingWorkbook=null;
     document.getElementById('dz-workbook').classList.remove('ready');
@@ -765,6 +869,25 @@ async function doImport(){
     console.error('导入失败:', err);
     toast('❌ 导入失败: ' + (err && err.message ? err.message : err));
   }
+}
+// 保存状态横幅: 让用户明确知道数据是否已持久化(刷新会不会丢)
+function showSaveBanner(channel){
+  const el = document.getElementById('save-banner');
+  if(!el) return;
+  if(channel === 'localStorage'){
+    el.innerHTML = '💾 数据已保存到本浏览器(localStorage 备胎通道)。刷新页面不会丢失。' +
+      '<button class="btn btn-ghost btn-sm" onclick="hideSaveBanner()">知道了</button>';
+    el.className = 'save-banner save-banner-ls';
+  }else{
+    el.innerHTML = '💾 数据已保存到本浏览器(IndexedDB 主通道)。刷新页面不会丢失, 不点「数据清空」可一直保存。' +
+      '<button class="btn btn-ghost btn-sm" onclick="hideSaveBanner()">知道了</button>';
+    el.className = 'save-banner save-banner-ok';
+  }
+  el.classList.remove('hidden');
+}
+function hideSaveBanner(){
+  const el = document.getElementById('save-banner');
+  if(el) el.classList.add('hidden');
 }
 
 /* ---------- 清空 ---------- */
