@@ -29,6 +29,14 @@
   .save-banner-ok{background:#ECFDF5;color:#047857;border:1px solid #A7F3D0;}
   .save-banner-ls{background:#FFFBEB;color:#B45309;border:1px solid #FDE68A;}
   .save-banner .btn{white-space:nowrap;}
+  /* 日期筛选条 */
+  .datebar{max-width:1400px;margin:14px auto 0;padding:10px 16px;background:#fff;border:1px solid #E2E8F0;border-radius:10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  .datebar-title{font-size:14px;font-weight:700;color:#4F46E5;white-space:nowrap;}
+  .datebar .filter-item{margin:0;}
+  .datebar input[type="date"]{padding:6px 10px;border:1px solid #CBD5E1;border-radius:6px;font-size:13px;}
+  .datebar-quick{display:flex;gap:6px;flex-wrap:wrap;}
+  .datebar-quick .btn{padding:5px 10px;}
+  #date-hint{font-size:12px;color:#64748B;}
   /* Tab */
   .tabs{max-width:1400px;margin:18px auto 0;padding:0 20px;display:flex;gap:8px;border-bottom:2px solid #E2E8F0;}
   .tab{padding:10px 22px;font-size:15px;font-weight:600;color:#64748B;cursor:pointer;border:none;background:none;border-bottom:3px solid transparent;margin-bottom:-2px;transition:.15s;}
@@ -132,6 +140,21 @@
     <button class="btn btn-import" onclick="openImportModal()">📥 数据导入</button>
     <button class="btn btn-clear" onclick="handleClear()">🗑 数据清空</button>
   </div>
+</div>
+
+<!-- 日期筛选条(全局生效: 整体数据 + 筛选数据) -->
+<div class="datebar" id="datebar">
+  <div class="datebar-title">📅 日期筛选</div>
+  <div class="filter-item"><label>开始</label><input type="date" id="d-from" onchange="applyDateFilter()"></div>
+  <div class="filter-item"><label>结束</label><input type="date" id="d-to" onchange="applyDateFilter()"></div>
+  <div class="datebar-quick">
+    <button class="btn btn-ghost btn-sm" onclick="setDateRange('last7')">近7天</button>
+    <button class="btn btn-ghost btn-sm" onclick="setDateRange('last30')">近30天</button>
+    <button class="btn btn-ghost btn-sm" onclick="setDateRange('thisMonth')">本月</button>
+    <button class="btn btn-ghost btn-sm" onclick="setDateRange('lastMonth')">上月</button>
+    <button class="btn btn-ghost btn-sm" onclick="setDateRange('all')">全部</button>
+  </div>
+  <span class="muted" id="date-hint"></span>
 </div>
 
 <!-- Tab 导航 -->
@@ -336,7 +359,8 @@ const COL = {
   cart:  ['总购物车数','购物车数','购物车','加购数','加购件数','购物车数量','总加购数'],
   owner: ['负责人','运营','owner','推广人','操作人','负责人ID','运营负责人'],
   cat:   ['品类','类目','category','商品品类','分类','产品品类','所属品类'],
-  short: ['商品简称','简称','商品名','名称','商品名称','产品简称']
+  short: ['商品简称','简称','商品名','名称','商品名称','产品简称'],
+  date:  ['日期','date','时间','投放日期','统计日期','数据日期','day']
 };
 
 /* ---------- 公式(仅代码, 不展示) ---------- */
@@ -392,13 +416,14 @@ async function dbGetOne(db, key){
 const LS_KEY = 'kw_analysis_ls_v1';
 function lsCols(dataset){
   const items = dataset.items;
-  const cols = { sku:[], kw:[], spend:[], rev:[], drev:[], clicks:[], orders:[], cart:[], owner:[], cat:[], short:[] };
+  const cols = { sku:[], kw:[], spend:[], rev:[], drev:[], clicks:[], orders:[], cart:[], owner:[], cat:[], short:[], date:[] };
   for(const it of items){
     cols.sku.push(it.sku);
     cols.kw.push(it.kw || '');
     cols.spend.push(it.spend); cols.rev.push(it.rev); cols.drev.push(it.drev);
     cols.clicks.push(it.clicks); cols.orders.push(it.orders); cols.cart.push(it.cart);
     cols.owner.push(it.owner); cols.cat.push(it.cat); cols.short.push(it.short || '');
+    cols.date.push(it.date || '');
   }
   return cols;
 }
@@ -406,7 +431,8 @@ function lsFromCols(cols){
   const n = cols.sku.length, items = [];
   for(let i=0;i<n;i++){
     items.push({ sku:cols.sku[i], kw:cols.kw[i] || '', spend:cols.spend[i], rev:cols.rev[i], drev:cols.drev[i],
-      clicks:cols.clicks[i], orders:cols.orders[i], cart:cols.cart[i], owner:cols.owner[i], cat:cols.cat[i], short:cols.short[i] || '' });
+      clicks:cols.clicks[i], orders:cols.orders[i], cart:cols.cart[i], owner:cols.owner[i], cat:cols.cat[i], short:cols.short[i] || '',
+      date: cols.date ? (cols.date[i] || '') : '' });
   }
   return items;
 }
@@ -542,6 +568,8 @@ async function dbClear(){
 /* ---------- 全局状态 ---------- */
 let dataset = null;           // {items, meta}
 let pendingWorkbook = null;   // {file, sheetNames, dataItems, dataSkips, ownerMap, ownerRows, dataSheet, mapSheet}
+let dateFrom = '';            // 日期筛选: 开始(YYYY-MM-DD, 空=不限)
+let dateTo = '';              // 日期筛选: 结束(YYYY-MM-DD, 空=不限)
 let pageState = { overall:{page:1,size:500}, filter:{page:1,size:500} };
 let filterDebounce = null;
 let filterMode = null;        // 'account' | 'cat' | null  (默认选项: 低于均值)
@@ -705,7 +733,8 @@ function mapDataRowsArr(rows){
   const header = (rows[0]||[]).map(String);
   const ci = {
     sku: idxOf(header,'sku'), kw: idxOf(header,'kw'), spend: idxOf(header,'spend'), rev: idxOf(header,'rev'),
-    drev: idxOf(header,'drev'), clicks: idxOf(header,'clicks'), orders: idxOf(header,'orders'), cart: idxOf(header,'cart')
+    drev: idxOf(header,'drev'), clicks: idxOf(header,'clicks'), orders: idxOf(header,'orders'), cart: idxOf(header,'cart'),
+    date: idxOf(header,'date')
   };
   const items = []; let skips=0;
   for(let i=1;i<rows.length;i++){
@@ -717,10 +746,27 @@ function mapDataRowsArr(rows){
       sku: String(sku).trim(),
       kw: ci.kw>=0 && r[ci.kw]!=null ? String(r[ci.kw]).trim() : '',
       spend: num(ci.spend>=0?r[ci.spend]:null), rev: num(ci.rev>=0?r[ci.rev]:null), drev: num(ci.drev>=0?r[ci.drev]:null),
-      clicks: num(ci.clicks>=0?r[ci.clicks]:null), orders: num(ci.orders>=0?r[ci.orders]:null), cart: num(ci.cart>=0?r[ci.cart]:null)
+      clicks: num(ci.clicks>=0?r[ci.clicks]:null), orders: num(ci.orders>=0?r[ci.orders]:null), cart: num(ci.cart>=0?r[ci.cart]:null),
+      date: ci.date>=0 ? normDate(r[ci.date]) : ''
     });
   }
   return {items, skips};
+}
+// 日期标准化: Excel 序列号(46251) / 日期对象 / '2026/8/12' / '2026-08-12' → 'YYYY-MM-DD'
+function normDate(v){
+  if(v==null || v==='') return '';
+  if(typeof v === 'number' && isFinite(v)){
+    // Excel 序列号: 1899-12-30 起算的天数 → JS Date
+    const d = new Date(Math.round((v - 25569) * 86400000));
+    if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+  }
+  if(v instanceof Date && !isNaN(v.getTime())){
+    return v.getFullYear() + '-' + String(v.getMonth()+1).padStart(2,'0') + '-' + String(v.getDate()).padStart(2,'0');
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  if(m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  return s.slice(0,10);
 }
 function mapOwnerRowsArr(rows){
   if(!rows || rows.length < 2) return {map:{}, rows:0};
@@ -864,6 +910,12 @@ async function doImport(){
     document.getElementById('dz-workbook-file').classList.add('hidden');
     document.getElementById('file-workbook').value='';
     updateImportStatus();
+    // 新数据导入: 重置日期筛选为全部, 并更新日期范围提示
+    dateFrom=''; dateTo='';
+    document.getElementById('d-from').value='';
+    document.getElementById('d-to').value='';
+    catAggCache=null;
+    updateDateHint();
     renderAll();
   }catch(err){
     console.error('导入失败:', err);
@@ -927,6 +979,75 @@ function switchTab(name){
 }
 
 /* ---------- 渲染 ---------- */
+// 日期筛选: 返回符合 dateFrom/dateTo 的行(空=不限)。每次过滤 O(n), 16.5万行 < 30ms
+function dateFilteredItems(){
+  if(!dataset) return [];
+  if(!dateFrom && !dateTo) return dataset.items;
+  const from = dateFrom || '0000-01-01', to = dateTo || '9999-12-31';
+  return dataset.items.filter(it => {
+    const d = it.date || '';
+    if(!d) return false;               // 无日期行在日期筛选下不显示
+    return d >= from && d <= to;
+  });
+}
+// 日期筛选变化: 更新提示 + 重渲染(整体/筛选都基于同一过滤)
+function applyDateFilter(){
+  dateFrom = document.getElementById('d-from').value || '';
+  dateTo = document.getElementById('d-to').value || '';
+  if(dateFrom && dateTo && dateFrom > dateTo){
+    toast('⚠️ 开始日期不能晚于结束日期');
+    [dateFrom, dateTo] = [dateTo, dateFrom];
+    document.getElementById('d-from').value = dateFrom;
+    document.getElementById('d-to').value = dateTo;
+  }
+  updateDateHint();
+  catAggCache = null;   // 日期范围变化, 品类均值缓存失效
+  pageState.overall.page = 1;
+  pageState.filter.page = 1;
+  renderAll();
+}
+// 快捷区间
+function setDateRange(kind){
+  const now = new Date();
+  const fmt = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  let from = '', to = fmt(now);
+  if(kind === 'last7'){ const d = new Date(now); d.setDate(d.getDate()-6); from = fmt(d); }
+  else if(kind === 'last30'){ const d = new Date(now); d.setDate(d.getDate()-29); from = fmt(d); }
+  else if(kind === 'thisMonth'){ from = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-01'; }
+  else if(kind === 'lastMonth'){
+    const d = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    from = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-01';
+    const d2 = new Date(now.getFullYear(), now.getMonth(), 0);
+    to = fmt(d2);
+  }
+  else if(kind === 'all'){ from = ''; to = ''; }
+  dateFrom = from; dateTo = to;
+  document.getElementById('d-from').value = from;
+  document.getElementById('d-to').value = to;
+  updateDateHint();
+  catAggCache = null;   // 日期范围变化, 品类均值缓存失效
+  pageState.overall.page = 1;
+  pageState.filter.page = 1;
+  renderAll();
+}
+// 提示当前生效区间 + 数据范围
+function updateDateHint(){
+  const el = document.getElementById('date-hint');
+  if(!el) return;
+  if(!dataset || !dataset.items.length){ el.textContent = ''; return; }
+  let minD = '', maxD = '';
+  for(const it of dataset.items){
+    const d = it.date || '';
+    if(!d) continue;
+    if(!minD || d < minD) minD = d;
+    if(!maxD || d > maxD) maxD = d;
+  }
+  const rangeTxt = (dateFrom || dateTo)
+    ? `当前显示: ${dateFrom || '最早'} ~ ${dateTo || '最晚'}`
+    : '当前显示: 全部日期';
+  const dataTxt = minD ? ` (数据范围 ${minD} ~ ${maxD})` : ' (数据无日期列)';
+  el.textContent = rangeTxt + dataTxt;
+}
 function renderAll(){
   renderOverall();
   renderFilterOptions();
@@ -947,9 +1068,22 @@ function renderOverall(){
     return;
   }
   statsBox.classList.remove('hidden');
-  const a = dataset.meta.agg;
+  const items = dateFilteredItems();
+  if(!items.length){
+    statsBox.classList.add('hidden');
+    body.innerHTML = `<div class="placeholder"><div class="icon">📅</div><h3>所选日期范围内无数据</h3><p>请调整上方的日期筛选,或点击「全部」查看完整数据</p></div>`;
+    if(hintEl) hintEl.textContent = '';
+    renderPager('overall-pager', 'overall', 0);
+    return;
+  }
+  let spend=0, rev=0, drev=0, clicks=0, orders=0, cart=0, matched=0;
+  for(const it of items){
+    spend+=it.spend; rev+=it.rev; drev+=it.drev; clicks+=it.clicks; orders+=it.orders; cart+=it.cart;
+    if(it.owner!=='未分配') matched++;
+  }
+  const a = {spend, rev, drev, clicks, orders, cart};
   statsBox.innerHTML = [
-    ['数据行数', fmtInt(dataset.meta.totalRows), 'primary'],
+    ['数据行数', fmtInt(items.length), 'primary'],
     ['总消耗', fmt(a.spend), ''],
     ['总成交金额', fmt(a.rev), ''],
     ['总ROI', fmt(calcRoi(a.rev,a.spend)), roiClass(calcRoi(a.rev,a.spend))],
@@ -958,11 +1092,12 @@ function renderOverall(){
     ['CVR', fmt(calcCvr(a.orders,a.clicks),1)+'%', ''],
     ['加购成本', fmt(calcCartCost(a.spend,a.cart)), '']
   ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
-  const rows = buildLevelRows(dataset.items);
+  const rows = buildLevelRows(items);
   const catSet = new Set(), shortSet = new Set();
-  for(const it of dataset.items){ catSet.add(it.cat); shortSet.add(it.cat+'|'+it.short); }
+  for(const it of items){ catSet.add(it.cat); shortSet.add(it.cat+'|'+it.short); }
+  const dateTxt = (dateFrom || dateTo) ? ` · ${dateFrom||'最早'}~${dateTo||'最晚'}` : '';
   renderLevelTable(rows, body, 'overall-pager', 'overall', hintEl,
-    `(共 ${fmtInt(dataset.meta.totalRows)} 行关键词 · ${fmtInt(catSet.size)} 个品类 · ${fmtInt(shortSet.size)} 个商品 · 关联负责人 ${fmtInt(dataset.meta.matched)} 个)`);
+    `(共 ${fmtInt(items.length)} 行关键词 · ${fmtInt(catSet.size)} 个品类 · ${fmtInt(shortSet.size)} 个商品 · 关联负责人 ${fmtInt(matched)} 个${dateTxt})`);
 }
 
 /* ---------- 筛选 ---------- */
@@ -986,7 +1121,8 @@ function renderFilterOptions(){
   document.getElementById('f-mode-account').classList.toggle('active', filterMode==='account');
   document.getElementById('f-mode-cat').classList.toggle('active', filterMode==='cat');
   renderFilterModeTip(document.getElementById('f-mode-tip'));
-  if(!dataset || !dataset.items.length){
+  const items = dateFilteredItems();
+  if(!dataset || !dataset.items.length || !items.length){
     catSel.innerHTML = '<option value="">全部品类</option>';
     ownerSel.innerHTML = '<option value="">全部负责人</option>';
     emptyBox.classList.remove('hidden');
@@ -995,14 +1131,14 @@ function renderFilterOptions(){
   }
   emptyBox.classList.add('hidden');
   const cats = new Set(), owners = new Set();
-  for(const it of dataset.items){ cats.add(it.cat); owners.add(it.owner); }
+  for(const it of items){ cats.add(it.cat); owners.add(it.owner); }
   catSel.innerHTML = '<option value="">全部品类</option>' + [...cats].sort().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
   ownerSel.innerHTML = '<option value="">全部负责人</option>' + [...owners].sort().map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('');
 }
 function getCatAgg(){
   if(catAggCache) return catAggCache;
   const m = new Map();
-  for(const it of dataset.items){
+  for(const it of dateFilteredItems()){
     if(!m.has(it.cat)) m.set(it.cat, aggRow());
     const a = m.get(it.cat);
     for(const k of AGG_KEYS) a[k] += it[k];
@@ -1012,6 +1148,7 @@ function getCatAgg(){
 }
 function getFiltered(){
   if(!dataset) return {items:[], hasFilter:false};
+  const base = dateFilteredItems();   // 日期筛选先行
   const fCat = document.getElementById('f-cat').value;
   const fOwner = document.getElementById('f-owner').value;
   const fKw = document.getElementById('f-kw').value.trim().toLowerCase();
@@ -1022,11 +1159,14 @@ function getFiltered(){
   const fVal = parseFloat(fValRaw);
   const hasCustom = fValRaw !== '' && !isNaN(fVal);
   const hasFilter = fCat || fOwner || fKw || fSku || hasCustom || !!filterMode;
-  // 无筛选条件: 直接返回原数组, 避免对 16.5 万行做无意义的全量 filter
-  if(!hasFilter) return {items: dataset.items, hasFilter:false};
-  const overallRoi = calcRoi(dataset.meta.agg.rev, dataset.meta.agg.spend);
+  // 无筛选条件: 直接返回日期过滤后的数组
+  if(!hasFilter) return {items: base, hasFilter:false};
+  // 低于均值对比基准: 当前日期范围内
+  let spend=0, rev=0;
+  for(const it of base){ spend+=it.spend; rev+=it.rev; }
+  const overallRoi = spend ? rev/spend : 0;
   const catAgg = filterMode==='cat' ? getCatAgg() : null;
-  const items = dataset.items.filter(it=>{
+  const items = base.filter(it=>{
     if(fCat && it.cat!==fCat) return false;
     if(fOwner && it.owner!==fOwner) return false;
     if(fKw && !it.kw.toLowerCase().includes(fKw)) return false;
@@ -1076,9 +1216,18 @@ function renderFilterResult(){
   if(!dataset || !dataset.items.length){ card.classList.add('hidden'); return; }
   card.classList.remove('hidden');
   const {items, hasFilter} = getFiltered();
-  const rows = hasFilter ? items : dataset.items;
+  const base = dateFilteredItems();
+  const rows = hasFilter ? items : base;
   const hintEl = document.getElementById('filter-hint');
   const modeTxt = filterMode==='account' ? ' · 低于整体均值' : filterMode==='cat' ? ' · 低于品类均值' : '';
+  if(!rows.length){
+    hintEl.textContent = hasFilter
+      ? `(筛选命中 0 行${modeTxt})` : `(所选日期范围内无数据)`;
+    document.getElementById('filter-stats').innerHTML = '';
+    document.getElementById('filter-body').innerHTML = `<div class="placeholder"><div class="icon">📅</div><h3>无数据</h3><p>请调整日期筛选或筛选条件</p></div>`;
+    renderPager('filter-pager', 'filter', 0);
+    return;
+  }
   hintEl.textContent = hasFilter
     ? `(筛选命中 ${fmtInt(rows.length)} 行${modeTxt})` : `(未筛选, 显示全部 ${fmtInt(rows.length)} 行)`;
   const agg = aggRow();
@@ -1203,6 +1352,7 @@ function toast(msg){
   try{
     dataset = await dbGet();
   }catch(e){ dataset = null; }
+  updateDateHint();
   renderAll();
 })();
 
