@@ -293,6 +293,16 @@ w[f]=1}i[b]=f;}}for(g=l.s.r+n;g<=l.e.r;++g){if((T[g]||{}).hidden)continue;var A=
  *   ※ 所有比率指标必须先汇总分子分母再相除, 严禁对逐行比率求平均
  * ===================================================================== */
 
+/* ---------- 全局错误捕获: 任何异常都明确提示, 杜绝"没反应" ---------- */
+window.addEventListener('error', e => {
+  console.error('页面运行错误:', e.message, e.filename || '', e.lineno || '');
+  try{ toast('⚠️ 页面运行出错: ' + (e.message||'未知错误') + (/(Chrome|Edge|Safari|Firefox)/i.test(navigator.userAgent) ? '' : ' (建议使用最新版 Chrome/Edge 浏览器)')); }catch(_){}
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('未处理的Promise错误:', e.reason);
+  try{ toast('⚠️ 操作失败: ' + ((e.reason && e.reason.message) ? e.reason.message : e.reason)); }catch(_){}
+});
+
 /* ---------- 列名智能归一 ---------- */
 function norm(s){ return String(s==null?'':s).replace(/[\s_\-（）()\/\\·.]+/g,'').toLowerCase(); }
 function matchCol(name, aliases){
@@ -458,7 +468,8 @@ function parseWorkbook(file){
           // CSV 用文本方式读(UTF-8 安全), array 模式会把中文按 Latin1 误解码成乱码
           wb = XLSX.read(e.target.result, {type:'string'});
         }else{
-          wb = XLSX.read(e.target.result, {type:'array', cellDates:false});
+          // cellFormula/cellHTML 关闭: 跳过公式与富文本解析, 减少大表解析耗时
+          wb = XLSX.read(e.target.result, {type:'array', cellDates:false, cellFormula:false, cellHTML:false});
         }
         const sheetNames = wb.SheetNames;
         let dataItems=null, dataSkips=0, ownerMap=null, ownerRows=0, dataSheet='', mapSheet='';
@@ -499,20 +510,32 @@ function parseWorkbook(file){
 }
 async function loadWorkbook(f){
   const big = f.size > 4*1024*1024;
-  toast(big ? '⏳ 正在解析大文件(' + (f.size/1024/1024).toFixed(1) + 'MB), 预计需要一些时间, 请勿关闭页面...' : '⏳ 正在解析总表...');
+  if(big){
+    // 大文件: XLSX.read 是同步解析, 期间页面会短暂无响应, 提前明确告知
+    toast(`⏳ 正在解析大文件(${(f.size/1024/1024).toFixed(1)}MB)... 页面会短暂无响应, 预计 5~30 秒, 请勿关闭或刷新页面`);
+  }else{
+    toast('⏳ 正在解析总表...');
+  }
   await tick();  // 让 toast 先渲染, 避免同步阻塞无反馈
   try{
+    const t0 = Date.now();
     const r = await parseWorkbook(f);
+    const cost = Date.now()-t0;
     if(!r.dataItems || !r.dataItems.length){ toast('⚠️ 未识别到有效数据(需要含 商品ID+关键词 的单品子表)'); return; }
     pendingWorkbook = r;
     document.getElementById('dz-workbook').classList.add('ready');
     const parts = [`✅ ${f.name} · ${r.sheetNames.length} 个子表`, `单品表「${r.dataSheet}」${r.dataItems.length.toLocaleString('zh-CN')} 行`];
     if(r.ownerMap) parts.push(`个人表「${r.mapSheet}」${r.ownerRows.toLocaleString('zh-CN')} 行(关联 ${Object.keys(r.ownerMap).length.toLocaleString('zh-CN')} 个商品ID)`);
     if(r.dataSkips) parts.push(`跳过${r.dataSkips.toLocaleString('zh-CN')}行(缺商品ID)`);
+    if(big) parts.push(`解析耗时 ${(cost/1000).toFixed(1)}s`);
     document.getElementById('dz-workbook-file').textContent = parts.join(' · ');
     document.getElementById('dz-workbook-file').classList.remove('hidden');
     updateImportStatus();
-  }catch(err){ toast('❌ 解析失败: ' + err.message); }
+    if(big) toast(`✅ 解析完成(${(cost/1000).toFixed(1)}s), 点击「⚡ 导入」`);
+  }catch(err){
+    console.error('解析失败:', err);
+    toast('❌ 解析失败: ' + (err && err.message ? err.message : err));
+  }
 }
 function findCol(keys, group){
   for(const k of keys){ if(matchCol(k, COL[group])) return k; }
@@ -625,21 +648,33 @@ async function doImport(){
   if(!pendingWorkbook) return;
   toast('⏳ 正在构建关联数据...');
   await tick();
-  const p = pendingWorkbook;
-  dataset = buildDataset({items:p.dataItems, skips:p.dataSkips}, {map:p.ownerMap, rows:p.ownerRows});
-  catAggCache = null;
-  filterMode = null;
-  toast('⏳ 正在保存到本地浏览器(' + dataset.meta.totalRows.toLocaleString('zh-CN') + ' 行)...');
-  await tick();
-  await dbPut(dataset);
-  closeImportModal();
-  toast('🎉 数据导入成功, 共 ' + fmtInt(dataset.meta.totalRows) + ' 行');
-  pendingWorkbook=null;
-  document.getElementById('dz-workbook').classList.remove('ready');
-  document.getElementById('dz-workbook-file').classList.add('hidden');
-  document.getElementById('file-workbook').value='';
-  updateImportStatus();
-  renderAll();
+  try{
+    const p = pendingWorkbook;
+    dataset = buildDataset({items:p.dataItems, skips:p.dataSkips}, {map:p.ownerMap, rows:p.ownerRows});
+    catAggCache = null;
+    filterMode = null;
+    toast('⏳ 正在保存到本地浏览器(' + dataset.meta.totalRows.toLocaleString('zh-CN') + ' 行)...');
+    await tick();
+    try{
+      await dbPut(dataset);
+    }catch(saveErr){
+      // 保存失败不阻断使用: 数据仍在内存中, 本次会话可用
+      console.warn('IndexedDB 保存失败:', saveErr);
+      toast('⚠️ 保存到浏览器失败(存储空间可能不足), 本次会话内仍可正常查看, 刷新页面后需重新导入');
+      await new Promise(r=>setTimeout(r, 1800));
+    }
+    closeImportModal();
+    toast('🎉 数据导入成功, 共 ' + fmtInt(dataset.meta.totalRows) + ' 行');
+    pendingWorkbook=null;
+    document.getElementById('dz-workbook').classList.remove('ready');
+    document.getElementById('dz-workbook-file').classList.add('hidden');
+    document.getElementById('file-workbook').value='';
+    updateImportStatus();
+    renderAll();
+  }catch(err){
+    console.error('导入失败:', err);
+    toast('❌ 导入失败: ' + (err && err.message ? err.message : err));
+  }
 }
 
 /* ---------- 清空 ---------- */
@@ -897,8 +932,9 @@ window.addEventListener('drop', async e=>{
   if(!/\.(xlsx|xls|csv)$/i.test(f.name)){ toast('⚠️ 仅支持 .xlsx / .xls / .csv 文件'); return; }
   await loadWorkbook(f);
   if(pendingWorkbook){
-    openImportModal();
-    toast('📥 总表已自动识别并填入, 点击「⚡ 导入」完成');
+    // 拖拽=明确导入意图: 自动完成导入, 无需再点「⚡ 导入」
+    toast('📥 文件已识别, 正在导入...');
+    await doImport();
   }
 });
 
