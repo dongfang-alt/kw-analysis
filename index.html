@@ -418,7 +418,9 @@ function buildLevelRows(items){
       for(const it of list) block.push({type:'kw', it});
     }
     block.unshift({type:'cat', name:cat, agg:catAgg});
-    rows.push(...block);
+    // 注意: 不能用 rows.push(...block) 展开 —— 真实表单分组可达 16.5 万+ 行,
+    // 展开超长数组作为函数参数会导致 V8 调用栈溢出(RangeError), 页面直接崩溃
+    for(let i=0;i<block.length;i++) rows.push(block[i]);
   }
   return rows;
 }
@@ -746,10 +748,10 @@ function renderOverall(){
     ['加购成本', fmt(calcCartCost(a.spend,a.cart)), '']
   ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
   const rows = buildLevelRows(dataset.items);
-  const catCount = new Set(dataset.items.map(i=>i.cat)).size;
-  const shortCount = new Set(dataset.items.map(i=>i.cat+'|'+i.short)).size;
+  const catSet = new Set(), shortSet = new Set();
+  for(const it of dataset.items){ catSet.add(it.cat); shortSet.add(it.cat+'|'+it.short); }
   renderLevelTable(rows, body, 'overall-pager', 'overall', hintEl,
-    `(共 ${fmtInt(dataset.meta.totalRows)} 行关键词 · ${fmtInt(catCount)} 个品类 · ${fmtInt(shortCount)} 个商品 · 关联负责人 ${fmtInt(dataset.meta.matched)} 个)`);
+    `(共 ${fmtInt(dataset.meta.totalRows)} 行关键词 · ${fmtInt(catSet.size)} 个品类 · ${fmtInt(shortSet.size)} 个商品 · 关联负责人 ${fmtInt(dataset.meta.matched)} 个)`);
 }
 
 /* ---------- 筛选 ---------- */
@@ -809,6 +811,8 @@ function getFiltered(){
   const fVal = parseFloat(fValRaw);
   const hasCustom = fValRaw !== '' && !isNaN(fVal);
   const hasFilter = fCat || fOwner || fKw || fSku || hasCustom || !!filterMode;
+  // 无筛选条件: 直接返回原数组, 避免对 16.5 万行做无意义的全量 filter
+  if(!hasFilter) return {items: dataset.items, hasFilter:false};
   const overallRoi = calcRoi(dataset.meta.agg.rev, dataset.meta.agg.spend);
   const catAgg = filterMode==='cat' ? getCatAgg() : null;
   const items = dataset.items.filter(it=>{
