@@ -229,17 +229,6 @@
           </div>
         </div>
       </div>
-      <!-- 基础筛选 -->
-      <div class="filter-section">
-        <div class="filter-section-title">🔎 基础筛选</div>
-        <div class="filter-bar">
-          <div class="filter-item"><label>品类</label><select id="f-cat" onchange="applyFilter()"><option value="">全部品类</option></select></div>
-          <div class="filter-item"><label>负责人</label><select id="f-owner" onchange="applyFilter()"><option value="">全部负责人</option></select></div>
-          <div class="filter-item"><label>关键词</label><input id="f-kw" placeholder="输入关键词..." oninput="applyFilter()"></div>
-          <div class="filter-item"><label>商品ID</label><input id="f-sku" placeholder="输入商品ID..." oninput="applyFilter()"></div>
-          <div class="filter-item"><label>&nbsp;</label><button class="btn btn-ghost btn-sm" onclick="resetFilter()">重置</button></div>
-        </div>
-      </div>
       <div id="filter-empty" class="empty hidden">请先导入数据</div>
     </div>
     <div class="card hidden" id="filter-result-card">
@@ -1142,7 +1131,6 @@ function updateDateHint(){
 }
 function renderAll(){
   renderOverall();
-  renderFilterOptions();
   renderFilterResult();
 }
 function renderOverall(){
@@ -1240,27 +1228,6 @@ function toggleFilterMode(mode){
   pageState.filter.page = 1;
   renderFilterResult();
 }
-function renderFilterOptions(){
-  const catSel = document.getElementById('f-cat'), ownerSel = document.getElementById('f-owner');
-  const emptyBox = document.getElementById('filter-empty');
-  const resultCard = document.getElementById('filter-result-card');
-  document.getElementById('f-mode-account').classList.toggle('active', filterMode==='account');
-  document.getElementById('f-mode-cat').classList.toggle('active', filterMode==='cat');
-  renderFilterModeTip(document.getElementById('f-mode-tip'));
-  const items = dateFilteredItems();
-  if(!dataset || !dataset.items.length || !items.length){
-    catSel.innerHTML = '<option value="">全部品类</option>';
-    ownerSel.innerHTML = '<option value="">全部负责人</option>';
-    emptyBox.classList.remove('hidden');
-    resultCard.classList.add('hidden');
-    return;
-  }
-  emptyBox.classList.add('hidden');
-  const cats = new Set(), owners = new Set();
-  for(const it of items){ cats.add(it.cat); owners.add(it.owner); }
-  catSel.innerHTML = '<option value="">全部品类</option>' + [...cats].sort().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
-  ownerSel.innerHTML = '<option value="">全部负责人</option>' + [...owners].sort().map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('');
-}
 function getCatAgg(){
   if(catAggCache) return catAggCache;
   const m = new Map();
@@ -1275,10 +1242,6 @@ function getCatAgg(){
 function getFiltered(){
   if(!dataset) return {items:[], hasFilter:false};
   const base = dateFilteredItems();   // 日期筛选先行
-  const fCat = document.getElementById('f-cat').value;
-  const fOwner = document.getElementById('f-owner').value;
-  const fKw = document.getElementById('f-kw').value.trim().toLowerCase();
-  const fSku = document.getElementById('f-sku').value.trim().toLowerCase();
   // 自定义指标筛选: 三指标拆出(消耗/点击量/总ROI), 可同时筛选(AND)
   const fOpSpend = document.getElementById('f-op-spend').value;
   const fValSpend = parseFloat(document.getElementById('f-val-spend').value.trim());
@@ -1287,7 +1250,7 @@ function getFiltered(){
   const fOpRoi = document.getElementById('f-op-roi').value;
   const fValRoi = parseFloat(document.getElementById('f-val-roi').value.trim());
   const hasCustom = !isNaN(fValSpend) || !isNaN(fValClicks) || !isNaN(fValRoi);
-  const hasFilter = fCat || fOwner || fKw || fSku || hasCustom || !!filterMode;
+  const hasFilter = hasCustom || !!filterMode;
   // 无筛选条件: 直接返回日期过滤后的数组
   if(!hasFilter) return {items: base, hasFilter:false};
   // 低于均值对比基准: 当前日期范围内
@@ -1296,10 +1259,6 @@ function getFiltered(){
   const overallRoi = spend ? rev/spend : 0;
   const catAgg = filterMode==='cat' ? getCatAgg() : null;
   const items = base.filter(it=>{
-    if(fCat && it.cat!==fCat) return false;
-    if(fOwner && it.owner!==fOwner) return false;
-    if(fKw && !it.kw.toLowerCase().includes(fKw)) return false;
-    if(fSku && !it.sku.toLowerCase().includes(fSku)) return false;
     // 自定义指标筛选: 三个条件同时生效(AND)
     if(!isNaN(fValSpend)){
       if(fOpSpend==='gte' ? !(it.spend >= fValSpend) : !(it.spend <= fValSpend)) return false;
@@ -1330,31 +1289,16 @@ function applyFilter(){
     renderFilterResult();
   }, 300);
 }
-function resetFilter(){
-  clearTimeout(filterDebounce);
-  document.getElementById('f-cat').value='';
-  document.getElementById('f-owner').value='';
-  document.getElementById('f-kw').value='';
-  document.getElementById('f-sku').value='';
-  document.getElementById('f-op-spend').value='gte';
-  document.getElementById('f-val-spend').value='';
-  document.getElementById('f-op-clicks').value='gte';
-  document.getElementById('f-val-clicks').value='';
-  document.getElementById('f-op-roi').value='gte';
-  document.getElementById('f-val-roi').value='';
-  filterMode = null;
-  document.getElementById('f-mode-account').classList.remove('active');
-  document.getElementById('f-mode-cat').classList.remove('active');
-  renderFilterModeTip(document.getElementById('f-mode-tip'));
-  filterSearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 表头搜索/排序一并重置
-  filterSort = {col:null, dir:0};
-  pageState.filter.page = 1;
-  renderFilterResult();
-}
 function renderFilterResult(){
   const card = document.getElementById('filter-result-card');
-  if(!dataset || !dataset.items.length){ card.classList.add('hidden'); return; }
+  const emptyBox = document.getElementById('filter-empty');
+  if(!dataset || !dataset.items.length){
+    card.classList.add('hidden');
+    if(emptyBox) emptyBox.classList.remove('hidden');
+    return;
+  }
   card.classList.remove('hidden');
+  if(emptyBox) emptyBox.classList.add('hidden');
   const {items, hasFilter} = getFiltered();
   const base = dateFilteredItems();
   let rows = hasFilter ? items : base;
