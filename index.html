@@ -600,6 +600,9 @@ let dateTo = '';              // 日期筛选: 结束(YYYY-MM-DD, 空=不限)
 let pageState = { overall:{page:1,size:500}, filter:{page:1,size:500}, anomaly:{page:1,size:500} };
 let filterDebounce = null;
 let anomalyMode = 'slide';            // 异常数据: 'slide' 周期下滑 | 'cat' 低于品类均值
+let anomalySearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 异常表头搜索(与整体数据样式一致)
+let anomalySort = {col:null, dir:0};  // 异常排序: col=数值列, dir=1降序/-1升序/0无
+let anomalyDebounce = null;
 let overallSearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 整体表头搜索(负责人/品类/商品简称/计划名字/关键词)
 let overallSort = {col:null, dir:0};               // 整体排序: col=指标列, dir=1降序/-1升序/0无
 let overallDebounce = null;
@@ -1392,6 +1395,33 @@ function buildCatRoiAnalysis(){
   results.sort((a,b)=> (a.kwRoi - a.catRoi) - (b.kwRoi - b.catRoi));   // 差距最大(最差)在前
   return results;
 }
+// 异常数据工具行: 搜索 + 排序 (样式与整体数据一致, 列按当前模式)
+function anomalyToolsHtml(mode){
+  const s = anomalySearch, so = anomalySort;
+  const sIn = (f, ph) => `<input class="tbl-search" placeholder="${ph}" value="${esc(s[f])}" oninput="anomalySearchInput('${f}',this.value)">`;
+  const sortBtn = (col, label) => {
+    const active = so.col===col ? ' active' : '';
+    const arrow = so.col===col ? (so.dir===1?'▼':'▲') : '↕';
+    return `<button class="tbl-sort${active}" onclick="toggleAnomalySort('${col}')">${label}<span class="arrow">${arrow}</span></button>`;
+  };
+  if(mode==='slide'){
+    return `<td>${sIn('kw','搜关键词')}</td><td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sortBtn('periods','周期数')}</td><td>${sortBtn('lastRev','最近周期成交')}</td><td>${sortBtn('prevRev','上周期成交')}</td><td>${sortBtn('chg','环比')}</td><td>${sortBtn('rev','总成交')}</td><td>${sortBtn('spend','总消耗')}</td><td>${sortBtn('roi','总ROI')}</td>`;
+  }
+  return `<td>${sIn('kw','搜关键词')}</td><td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sortBtn('kwRoi','关键词ROI')}</td><td>${sortBtn('catRoi','品类汇总ROI')}</td><td>${sortBtn('diff','差值')}</td><td>${sortBtn('spend','总消耗')}</td><td>${sortBtn('rev','总成交')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('orders','订单量')}</td>`;
+}
+function anomalySearchInput(f, v){ anomalySearch[f] = v; scheduleAnomalyRefresh(); }
+function scheduleAnomalyRefresh(){
+  clearTimeout(anomalyDebounce);
+  anomalyDebounce = setTimeout(()=>{ pageState.anomaly.page = 1; renderAnomaly(); }, 300);
+}
+function toggleAnomalySort(col){
+  const so = anomalySort;
+  if(so.col !== col){ so.col = col; so.dir = 1; }
+  else if(so.dir === 1){ so.dir = -1; }
+  else { so.col = null; so.dir = 0; }
+  pageState.anomaly.page = 1;
+  renderAnomaly();
+}
 function setAnomalyMode(mode){
   anomalyMode = mode;
   document.getElementById('a-mode-slide').classList.toggle('active', anomalyMode==='slide');
@@ -1423,9 +1453,20 @@ function renderAnomaly(){
   }
   card.classList.remove('hidden');
   if(emptyBox) emptyBox.classList.add('hidden');
-  const rows = anomalyMode==='slide' ? buildSlideAnalysis() : buildCatRoiAnalysis();
+  let rows = anomalyMode==='slide' ? buildSlideAnalysis() : buildCatRoiAnalysis();
+  // 表头搜索过滤(关键词/负责人/品类/计划名字) —— 与整体数据样式一致
+  const as = anomalySearch;
+  if(as.owner || as.cat || as.plan || as.kw){
+    rows = rows.filter(r =>
+      (!as.owner || (r.owner||'').indexOf(as.owner)>=0) &&
+      (!as.cat || (r.cat||'').indexOf(as.cat)>=0) &&
+      (!as.plan || (r.plan||'').indexOf(as.plan)>=0) &&
+      (!as.kw || (r.kw||'').indexOf(as.kw)>=0)
+    );
+  }
+  const searchTxt = (as.owner||as.cat||as.plan||as.kw) ? ' · 已按表头搜索过滤' : '';
   if(!rows.length){
-    hintEl.textContent = anomalyMode==='slide' ? '(无持续下滑的关键词)' : '(无低于品类均值的关键词)';
+    hintEl.textContent = (anomalyMode==='slide' ? '(无持续下滑的关键词)' : '(无低于品类均值的关键词)') + searchTxt;
     statsBox.innerHTML = '';
     body.innerHTML = `<div class="placeholder"><div class="icon">📉</div><h3>无异常数据</h3><p>当前条件下没有命中异常关键词</p></div>`;
     renderPager('anomaly-pager', 'anomaly', 0);
@@ -1450,6 +1491,30 @@ function renderAnomaly(){
       ['涉及品类', fmtInt(catSet.size), '']
     ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
   }
+  // 表头排序 —— 与整体数据样式一致
+  const ANOMALY_SORT_LABEL = {periods:'周期数', lastRev:'最近周期成交', prevRev:'上周期成交', chg:'环比', kwRoi:'关键词ROI', catRoi:'品类汇总ROI', diff:'差值', spend:'总消耗', rev:'总成交', clicks:'点击量', orders:'订单量', roi:'总ROI'};
+  function sortVal(r, col){
+    if(col==='periods') return r.periods;
+    if(col==='lastRev') return r.lastRev;
+    if(col==='prevRev') return r.prevRev;
+    if(col==='chg') return r.prevRev ? (r.lastRev - r.prevRev)/r.prevRev*100 : (r.lastRev ? -100 : 0);
+    if(col==='kwRoi') return r.kwRoi;
+    if(col==='catRoi') return r.catRoi;
+    if(col==='diff') return r.kwRoi - r.catRoi;
+    if(col==='clicks') return r.agg.clicks;
+    if(col==='orders') return r.agg.orders;
+    if(col==='spend') return r.agg.spend;
+    if(col==='rev') return r.agg.rev;
+    if(col==='roi') return calcRoi(r.agg.rev, r.agg.spend);
+    return 0;
+  }
+  let sortActive = false;
+  if(anomalySort.col){
+    sortActive = true;
+    const col = anomalySort.col, dir = anomalySort.dir;
+    rows = rows.slice().sort((x,y)=> (sortVal(y,col) - sortVal(x,col)) * dir);
+  }
+  const sortTxt = anomalySort.col ? ` · 已按「${ANOMALY_SORT_LABEL[anomalySort.col]||anomalySort.col}」${anomalySort.dir===1?'降序':'升序'}` : '';
   // 表格(分页)
   const st = pageState.anomaly;
   const total = rows.length;
@@ -1457,24 +1522,22 @@ function renderAnomaly(){
   if(st.page > pages) st.page = pages;
   if(st.page < 1) st.page = 1;
   const slice = rows.slice((st.page-1)*st.size, st.page*st.size);
-  let head, trs;
+  let trs;
   if(anomalyMode==='slide'){
-    head = `<tr><th>关键词</th><th>负责人</th><th>品类</th><th>计划名字</th><th>周期数</th><th>最近周期成交</th><th>上周期成交</th><th>环比</th><th>总成交</th><th>总消耗</th><th>总ROI</th></tr>`;
     trs = slice.map(r=>{
       const chg = r.prevRev ? (r.lastRev - r.prevRev)/r.prevRev*100 : (r.lastRev ? -100 : 0);
       return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num">${r.periods}</td><td class="num">${fmt(r.lastRev)}</td><td class="num">${fmt(r.prevRev)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td><td class="num">${fmt(r.agg.rev)}</td><td class="num">${fmt(r.agg.spend)}</td><td class="num ${roiClass(calcRoi(r.agg.rev,r.agg.spend))}">${fmt(calcRoi(r.agg.rev,r.agg.spend))}</td></tr>`;
     }).join('');
   }else{
-    head = `<tr><th>关键词</th><th>负责人</th><th>品类</th><th>计划名字</th><th>关键词ROI</th><th>品类汇总ROI</th><th>差值</th><th>总消耗</th><th>总成交</th><th>点击量</th><th>订单量</th></tr>`;
     trs = slice.map(r=>{
       const diff = r.kwRoi - r.catRoi;
       return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num roi-bad">${fmt(r.kwRoi)}</td><td class="num">${fmt(r.catRoi)}</td><td class="num roi-bad">${fmt(diff)}</td><td class="num">${fmt(r.agg.spend)}</td><td class="num">${fmt(r.agg.rev)}</td><td class="num">${fmtInt(r.agg.clicks)}</td><td class="num">${fmtInt(r.agg.orders)}</td></tr>`;
     }).join('');
   }
-  hintEl.textContent = anomalyMode==='slide'
+  hintEl.textContent = (anomalyMode==='slide'
     ? `(命中 ${fmtInt(total)} 个持续下滑关键词 · 7天周期成交逐期递减)`
-    : `(命中 ${fmtInt(total)} 个低于品类均值的关键词 · 按差距升序)`;
-  body.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${trs}</tbody></table></div>`;
+    : `(命中 ${fmtInt(total)} 个低于品类均值的关键词 · 按差距升序)`) + searchTxt + sortTxt;
+  body.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr class="tbl-tools">${anomalyToolsHtml(anomalyMode)}</tr></thead><tbody>${trs}</tbody></table></div>`;
   renderPager('anomaly-pager', 'anomaly', total);
 }
 
@@ -1498,12 +1561,16 @@ function renderPager(containerId, key, total){
 }
 function pageGo(key, delta){
   pageState[key].page += delta;
-  if(key==='overall') renderOverall(); else renderFilterResult();
+  if(key==='overall') renderOverall();
+  else if(key==='anomaly') renderAnomaly();
+  else renderFilterResult();
 }
 function pageSizeChange(key, v){
   pageState[key].size = Number(v);
   pageState[key].page = 1;
-  if(key==='overall') renderOverall(); else renderFilterResult();
+  if(key==='overall') renderOverall();
+  else if(key==='anomaly') renderAnomaly();
+  else renderFilterResult();
 }
 
 /* ---------- 拖拽导入(总表) ---------- */
