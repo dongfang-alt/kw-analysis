@@ -1149,9 +1149,10 @@ function renderOverall(){
     ['CVR', fmt(calcCvr(a.orders,a.clicks),1)+'%', ''],
     ['加购成本', fmt(calcCartCost(a.spend,a.cart)), '']
   ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
-  // 表头排序(对明细排序后重建层级)
-  let rows;
+  // 表头排序: 激活时切换为平铺明细视图(每行一个关键词, 直接按指标排序, 不再按品类分组)
+  let rows, sortActive = false;
   if(overallSort.col){
+    sortActive = true;
     const col = overallSort.col, dir = overallSort.dir;
     const sorted = viewItems.slice().sort((x,y)=>{
       let vx, vy;
@@ -1164,7 +1165,7 @@ function renderOverall(){
       else if(col==='cartcost'){ vx = calcCartCost(x.spend,x.cart); vy = calcCartCost(y.spend,y.cart); }
       return (vx - vy) * dir;
     });
-    rows = buildLevelRows(sorted);
+    rows = sorted.map(it => ({type:'kw', it}));
   }else{
     rows = buildLevelRows(viewItems);
   }
@@ -1172,7 +1173,8 @@ function renderOverall(){
   for(const it of viewItems){ catSet.add(it.cat); shortSet.add(it.cat+'|'+it.short); }
   const dateTxt = (dateFrom || dateTo) ? ` · ${dateFrom||'最早'}~${dateTo||'最晚'}` : '';
   const searchTxt = (so.owner||so.cat||so.short) ? ` · 已按关键词搜索` : '';
-  const sortTxt = overallSort.col ? ` · 已按${overallSort.col}${overallSort.dir===1?'降序':'升序'}` : '';
+  const SORT_LABEL = {kw:'关键词', spend:'消耗', roi:'总ROI', droi:'直接ROI', cpc:'CPC', cvr:'CVR', cartcost:'加购成本'};
+  const sortTxt = overallSort.col ? ` · 已按「${SORT_LABEL[overallSort.col]||overallSort.col}」${overallSort.dir===1?'降序':'升序'}${sortActive?'(平铺明细)':''}` : '';
   renderLevelTable(rows, body, 'overall-pager', 'overall', hintEl,
     `(共 ${fmtInt(viewItems.length)} 行关键词 · ${fmtInt(catSet.size)} 个品类 · ${fmtInt(shortSet.size)} 个商品 · 关联负责人 ${fmtInt(matched)} 个${dateTxt}${searchTxt}${sortTxt})`,
     overallToolsHtml());
