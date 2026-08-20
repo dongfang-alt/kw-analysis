@@ -81,7 +81,7 @@
   table.tbl tr.lv-cat:hover td,table.tbl tr.lv-short:hover td{background:#EEF2FF;}
   td.lv-name{min-width:180px;font-weight:600;}
   td.lv-dim{min-width:110px;color:#94A3B8;font-weight:400;}
-  thead th:nth-child(1),thead th:nth-child(2),thead th:nth-child(3){min-width:110px;}
+  thead th:nth-child(1),thead th:nth-child(2),thead th:nth-child(3),thead th:nth-child(4){min-width:100px;}
   .lv-dot{color:#6366F1;margin-right:4px;}
   .lv-cat .lv-dot{color:#4F46E5;}
   /* 按钮选中态 */
@@ -577,6 +577,12 @@ let catAggCache = null;       // Map<品类, agg> 品类聚合缓存
 /* ---------- 层级表工具 ---------- */
 const AGG_KEYS = ['spend','rev','drev','clicks','orders','cart'];
 function aggRow(){ return {spend:0,rev:0,drev:0,clicks:0,orders:0,cart:0}; }
+// 组内负责人集合 → 显示文本: 全部未分配显示'未分配', 否则去重 join
+function ownerText(owners){
+  const arr = [...owners].filter(o => o && o !== '未分配');
+  if(!arr.length) return '未分配';
+  return arr.join('、');
+}
 // 按 品类→商品简称 分组(保持首次出现顺序), 生成渲染行: {type:'cat'|'short'|'kw', ...}
 function buildLevelRows(items){
   const catMap = new Map();
@@ -590,13 +596,18 @@ function buildLevelRows(items){
   for(const [cat, shortMap] of catMap){
     const block = [];
     const catAgg = aggRow();
+    const catOwners = new Set();
     for(const [short, list] of shortMap){
       const shortAgg = aggRow();
-      for(const it of list){ for(const k of AGG_KEYS){ catAgg[k]+=it[k]; shortAgg[k]+=it[k]; } }
-      block.push({type:'short', cat:cat, name:short || '—', agg:shortAgg});
+      const shortOwners = new Set();
+      for(const it of list){
+        for(const k of AGG_KEYS){ catAgg[k]+=it[k]; shortAgg[k]+=it[k]; }
+        catOwners.add(it.owner); shortOwners.add(it.owner);
+      }
+      block.push({type:'short', cat:cat, name:short || '—', agg:shortAgg, owners:shortOwners});
       for(const it of list) block.push({type:'kw', it});
     }
-    block.unshift({type:'cat', name:cat, agg:catAgg});
+    block.unshift({type:'cat', name:cat, agg:catAgg, owners:catOwners});
     // 注意: 不能用 rows.push(...block) 展开 —— 真实表单分组可达 16.5 万+ 行,
     // 展开超长数组作为函数参数会导致 V8 调用栈溢出(RangeError), 页面直接崩溃
     for(let i=0;i<block.length;i++) rows.push(block[i]);
@@ -622,15 +633,15 @@ function renderLevelTable(rows, bodyEl, pagerId, pageKey, hintEl, hintText){
   const slice = rows.slice((st.page-1)*st.size, st.page*st.size);
   const trs = slice.map(r=>{
     if(r.type==='cat'){
-      return `<tr class="lv-cat"><td class="lv-name"><span class="lv-dot">▣</span>${esc(r.name)}</td><td class="lv-dim">—</td><td class="lv-dim">—</td>${metricCells(r.agg)}</tr>`;
+      return `<tr class="lv-cat"><td class="lv-dim">${esc(ownerText(r.owners))}</td><td class="lv-name"><span class="lv-dot">▣</span>${esc(r.name)}</td><td class="lv-dim">—</td><td class="lv-dim">—</td>${metricCells(r.agg)}</tr>`;
     }else if(r.type==='short'){
-      return `<tr class="lv-short"><td class="lv-dim">${esc(r.cat)}</td><td class="lv-name">▢ ${esc(r.name)}</td><td class="lv-dim">—</td>${metricCells(r.agg)}</tr>`;
+      return `<tr class="lv-short"><td class="lv-dim">${esc(ownerText(r.owners))}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-name">▢ ${esc(r.name)}</td><td class="lv-dim">—</td>${metricCells(r.agg)}</tr>`;
     }
     const it = r.it;
-    return `<tr><td class="lv-dim">${esc(it.cat)}</td><td class="lv-dim">${esc(it.short)||'—'}</td><td class="lv-name">${esc(it.kw)||'—'}</td>${metricCells(it)}</tr>`;
+    return `<tr><td class="lv-dim">${esc(it.owner)}</td><td class="lv-dim">${esc(it.cat)}</td><td class="lv-dim">${esc(it.short)||'—'}</td><td class="lv-name">${esc(it.kw)||'—'}</td>${metricCells(it)}</tr>`;
   }).join('');
   bodyEl.innerHTML = `<div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>品类</th><th>商品简称</th><th>关键词</th><th>消耗</th><th>总ROI</th><th>直接ROI</th><th>CPC</th><th>CVR</th><th>加购成本</th></tr></thead>
+    <thead><tr><th>负责人</th><th>品类</th><th>商品简称</th><th>关键词</th><th>消耗</th><th>总ROI</th><th>直接ROI</th><th>CPC</th><th>CVR</th><th>加购成本</th></tr></thead>
     <tbody>${trs}</tbody></table></div>`;
   if(hintEl) hintEl.textContent = hintText;
   renderPager(pagerId, pageKey, total);
@@ -1313,11 +1324,11 @@ function exportReport(mode){
   }else{
     rows = dataset.items;
   }
-  const header = ['品类','负责人','商品ID','商品简称','关键词','消耗','总成交金额','直接成交金额','点击量','订单量','总购物车数','总ROI','直接ROI','CPC','CVR(%)','加购成本'];
+  const header = ['负责人','品类','商品ID','商品简称','关键词','消耗','总成交金额','直接成交金额','点击量','订单量','总购物车数','总ROI','直接ROI','CPC','CVR(%)','加购成本'];
   const lines = [header.join(',')];
   for(const it of rows){
     lines.push([
-      csvCell(it.cat), csvCell(it.owner), csvCell(it.sku), csvCell(it.short), csvCell(it.kw),
+      csvCell(it.owner), csvCell(it.cat), csvCell(it.sku), csvCell(it.short), csvCell(it.kw),
       it.spend, it.rev, it.drev, it.clicks, it.orders, it.cart,
       calcRoi(it.rev,it.spend).toFixed(2), calcRoi(it.drev,it.spend).toFixed(2),
       calcCpc(it.spend,it.clicks).toFixed(2), calcCvr(it.orders,it.clicks).toFixed(2), calcCartCost(it.spend,it.cart).toFixed(2)
