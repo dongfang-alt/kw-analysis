@@ -358,6 +358,15 @@ function matchCol(name, aliases){
   }
   return false;
 }
+// 精确匹配(仅列名与别名完全一致) —— 用于 idxOf 第一轮, 避免「计划简称」模糊命中「简称」而抢走「商品简称」
+function matchColExact(name, aliases){
+  const n = norm(name);
+  if(!n) return false;
+  for(const a of aliases){
+    if(n === norm(a)) return true;
+  }
+  return false;
+}
 const COL = {
   sku:   ['商品ID','商品id','商品编号','item_id','itemid','sku_id','sku','单品ID','单品id','主体ID','主体id'],
   kw:    ['关键词','keyword','投放词','词'],
@@ -771,6 +780,9 @@ function findCol(keys, group){
   return null;
 }
 function idxOf(header, group){
+  // 第一轮: 精确匹配(如「商品简称」优先于「计划简称」)
+  for(let i=0;i<header.length;i++){ if(matchColExact(header[i], COL[group])) return i; }
+  // 第二轮: 模糊匹配(兼容列名变体)
   for(let i=0;i<header.length;i++){ if(matchCol(header[i], COL[group])) return i; }
   return -1;
 }
