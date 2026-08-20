@@ -84,9 +84,8 @@
   thead th:nth-child(1),thead th:nth-child(2),thead th:nth-child(3),thead th:nth-child(4){min-width:100px;}
   .lv-dot{color:#6366F1;margin-right:4px;}
   .lv-cat .lv-dot{color:#4F46E5;}
-  /* 表头第二行: 搜索 + 排序 */
-  tr.tbl-tools td{padding:6px 8px;background:#F8FAFC;border-bottom:1px solid #E2E8F0;}
-  tr.tbl-tools td:hover{background:#F8FAFC;}
+  /* 表头第二行: 搜索 + 排序 (整体数据中工具行即表头, 需 sticky 固定) */
+  tr.tbl-tools td{padding:6px 8px;background:#F8FAFC;border-bottom:1px solid #E2E8F0;position:sticky;top:0;z-index:5;}
   .tbl-search{width:100%;min-width:70px;height:26px;border:1px solid #CBD5E1;border-radius:6px;padding:0 6px;font-size:12px;background:#fff;color:#1E293B;}
   .tbl-search:focus{outline:2px solid #C7D2FE;border-color:#6366F1;}
   .tbl-sort{display:inline-flex;align-items:center;gap:3px;height:26px;border:1px solid #CBD5E1;border-radius:6px;padding:0 8px;font-size:12px;background:#fff;color:#475569;cursor:pointer;transition:.15s;font-weight:600;white-space:nowrap;}
@@ -663,8 +662,12 @@ function renderLevelTable(rows, bodyEl, pagerId, pageKey, hintEl, hintText, tool
     const it = r.it;
     return `<tr><td class="lv-dim">${esc(it.owner)}</td><td class="lv-dim">${esc(it.cat)}</td><td class="lv-dim">${esc(it.short)||'—'}</td><td class="lv-name">${esc(it.kw)||'—'}</td>${metricCells(it)}</tr>`;
   }).join('');
+  // 表头: 有工具行(整体数据)则工具行即表头; 无工具行(筛选数据)保留原表头文字行
+  const headHtml = toolsHtml
+    ? `<tr class="tbl-tools">${toolsHtml}</tr>`
+    : `<tr><th>负责人</th><th>品类</th><th>商品简称</th><th>关键词</th><th>消耗</th><th>总ROI</th><th>直接ROI</th><th>CPC</th><th>CVR</th><th>加购成本</th></tr>`;
   bodyEl.innerHTML = `<div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>负责人</th><th>品类</th><th>商品简称</th><th>关键词</th><th>消耗</th><th>总ROI</th><th>直接ROI</th><th>CPC</th><th>CVR</th><th>加购成本</th></tr>${toolsHtml?`<tr class="tbl-tools">${toolsHtml}</tr>`:''}</thead>
+    <thead>${headHtml}</thead>
     <tbody>${trs}</tbody></table></div>`;
   if(hintEl) hintEl.textContent = hintText;
   renderPager(pagerId, pageKey, total);
