@@ -102,9 +102,6 @@
   .filter-section:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
   .filter-section-title{font-size:12px;font-weight:700;color:#64748B;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
   .filter-mode-tip{font-size:12px;color:#4F46E5;background:#EEF2FF;border:1px solid #C7D2FE;padding:6px 10px;border-radius:8px;margin-top:8px;display:inline-block;}
-  /* 默认选项 与 自定义选项 并排 */
-  .filter-cols{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;border-bottom:1px dashed #E2E8F0;margin-bottom:14px;padding-bottom:12px;}
-  .filter-cols .filter-section{flex:1 1 340px;min-width:280px;border-bottom:none;margin-bottom:0;padding-bottom:0;}
   /* 三指标拆出: 比较符 + 数值 横向一组 */
   .cmp-row{display:flex;gap:6px;align-items:center;}
   .cmp-row select{width:66px;min-width:66px;}
@@ -209,24 +206,13 @@
     </div>
     <div class="card">
       <div class="card-title">🎛 筛选条件</div>
-      <div class="filter-cols">
-        <!-- 默认选项: 低于均值 -->
-        <div class="filter-section">
-          <div class="filter-section-title">📌 默认选项 · 对比均值(总ROI)</div>
-          <div class="filter-bar">
-            <button class="btn btn-ghost btn-sm" id="f-mode-account" onclick="toggleFilterMode('account')">📉 账户维度 · 低于整体均值</button>
-            <button class="btn btn-ghost btn-sm" id="f-mode-cat" onclick="toggleFilterMode('cat')">📉 品类维度 · 低于品类均值</button>
-          </div>
-          <div id="f-mode-tip"></div>
-        </div>
-        <!-- 自定义指标筛选: 三指标拆出, 可同时筛选 -->
-        <div class="filter-section">
-          <div class="filter-section-title">⚙️ 自定义选项 · 指标筛选</div>
-          <div class="filter-bar">
-            <div class="filter-item"><label>消耗</label><div class="cmp-row"><select id="f-op-spend" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-spend" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
-            <div class="filter-item"><label>点击量</label><div class="cmp-row"><select id="f-op-clicks" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-clicks" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
-            <div class="filter-item"><label>总ROI</label><div class="cmp-row"><select id="f-op-roi" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-roi" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
-          </div>
+      <!-- 自定义指标筛选: 三指标拆出, 可同时筛选 -->
+      <div class="filter-section">
+        <div class="filter-section-title">⚙️ 自定义选项 · 指标筛选</div>
+        <div class="filter-bar">
+          <div class="filter-item"><label>消耗</label><div class="cmp-row"><select id="f-op-spend" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-spend" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
+          <div class="filter-item"><label>点击量</label><div class="cmp-row"><select id="f-op-clicks" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-clicks" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
+          <div class="filter-item"><label>总ROI</label><div class="cmp-row"><select id="f-op-roi" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-roi" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
         </div>
       </div>
       <div id="filter-empty" class="empty hidden">请先导入数据</div>
@@ -589,8 +575,6 @@ let dateFrom = '';            // 日期筛选: 起始(YYYY-MM-DD, 空=不限)
 let dateTo = '';              // 日期筛选: 结束(YYYY-MM-DD, 空=不限)
 let pageState = { overall:{page:1,size:500}, filter:{page:1,size:500} };
 let filterDebounce = null;
-let filterMode = null;        // 'account' | 'cat' | null  (默认选项: 低于均值)
-let catAggCache = null;       // Map<品类, agg> 品类聚合缓存
 let overallSearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 整体表头搜索(负责人/品类/商品简称/计划名字/关键词)
 let overallSort = {col:null, dir:0};               // 整体排序: col=指标列, dir=1降序/-1升序/0无
 let overallDebounce = null;
@@ -933,8 +917,6 @@ async function doImport(){
   try{
     const p = pendingWorkbook;
     dataset = buildDataset({items:p.dataItems, skips:p.dataSkips}, {map:p.ownerMap, rows:p.ownerRows});
-    catAggCache = null;
-    filterMode = null;
     const total = dataset.meta.totalRows;
     toast('⏳ 正在保存到本地浏览器(' + total.toLocaleString('zh-CN') + ' 行)...');
     await tick();
@@ -995,7 +977,6 @@ async function doImport(){
     dateFrom=''; dateTo='';
     document.getElementById('d-from').value='';
     document.getElementById('d-to').value='';
-    catAggCache=null;
     updateDateHint();
     renderAll();
   }catch(err){
@@ -1033,8 +1014,6 @@ function handleClear(){
   showConfirm('数据清空', '确定清空全部数据吗?<br>导入的数据将从本电脑浏览器中永久移除, 不可恢复。', () => {
     dbClear().catch(()=>{});
     dataset = null;
-    catAggCache = null;
-    filterMode = null;
     renderAll();
     toast('🗑 数据已清空');
   });
@@ -1082,7 +1061,6 @@ function applyDateFilter(){
     document.getElementById('d-to').value = dateTo;
   }
   updateDateHint();
-  catAggCache = null;   // 日期范围变化, 品类均值缓存失效
   pageState.overall.page = 1;
   pageState.filter.page = 1;
   renderAll();
@@ -1106,7 +1084,6 @@ function setDateRange(kind){
   document.getElementById('d-from').value = from;
   document.getElementById('d-to').value = to;
   updateDateHint();
-  catAggCache = null;   // 日期范围变化, 品类均值缓存失效
   pageState.overall.page = 1;
   pageState.filter.page = 1;
   renderAll();
@@ -1215,30 +1192,6 @@ function renderOverall(){
 }
  
 /* ---------- 筛选 ---------- */
-function renderFilterModeTip(el){
-  const tips = {account:'账户维度：筛选 总ROI < 整体均值 的数据', cat:'品类维度：筛选 总ROI < 所属品类均值 的数据'};
-  el.innerHTML = filterMode ? `<span class="filter-mode-tip">${tips[filterMode]}</span>` : '';
-}
-function toggleFilterMode(mode){
-  if(filterMode === mode) filterMode = null;
-  else filterMode = mode;
-  document.getElementById('f-mode-account').classList.toggle('active', filterMode==='account');
-  document.getElementById('f-mode-cat').classList.toggle('active', filterMode==='cat');
-  renderFilterModeTip(document.getElementById('f-mode-tip'));
-  pageState.filter.page = 1;
-  renderFilterResult();
-}
-function getCatAgg(){
-  if(catAggCache) return catAggCache;
-  const m = new Map();
-  for(const it of dateFilteredItems()){
-    if(!m.has(it.cat)) m.set(it.cat, aggRow());
-    const a = m.get(it.cat);
-    for(const k of AGG_KEYS) a[k] += it[k];
-  }
-  catAggCache = m;
-  return m;
-}
 function getFiltered(){
   if(!dataset) return {items:[], hasFilter:false};
   const base = dateFilteredItems();   // 日期筛选先行
@@ -1250,14 +1203,9 @@ function getFiltered(){
   const fOpRoi = document.getElementById('f-op-roi').value;
   const fValRoi = parseFloat(document.getElementById('f-val-roi').value.trim());
   const hasCustom = !isNaN(fValSpend) || !isNaN(fValClicks) || !isNaN(fValRoi);
-  const hasFilter = hasCustom || !!filterMode;
+  const hasFilter = hasCustom;
   // 无筛选条件: 直接返回日期过滤后的数组
   if(!hasFilter) return {items: base, hasFilter:false};
-  // 低于均值对比基准: 当前日期范围内
-  let spend=0, rev=0;
-  for(const it of base){ spend+=it.spend; rev+=it.rev; }
-  const overallRoi = spend ? rev/spend : 0;
-  const catAgg = filterMode==='cat' ? getCatAgg() : null;
   const items = base.filter(it=>{
     // 自定义指标筛选: 三个条件同时生效(AND)
     if(!isNaN(fValSpend)){
@@ -1269,14 +1217,6 @@ function getFiltered(){
     if(!isNaN(fValRoi)){
       const v = calcRoi(it.rev,it.spend);
       if(fOpRoi==='gte' ? !(v >= fValRoi) : !(v <= fValRoi)) return false;
-    }
-    // 默认选项: 低于均值
-    if(filterMode==='account'){
-      if(!(calcRoi(it.rev,it.spend) < overallRoi)) return false;
-    }else if(filterMode==='cat'){
-      const ca = catAgg.get(it.cat);
-      const catRoi = ca && ca.spend ? ca.rev/ca.spend : 0;
-      if(!(calcRoi(it.rev,it.spend) < catRoi)) return false;
     }
     return true;
   });
@@ -1303,7 +1243,6 @@ function renderFilterResult(){
   const base = dateFilteredItems();
   let rows = hasFilter ? items : base;
   const hintEl = document.getElementById('filter-hint');
-  const modeTxt = filterMode==='account' ? ' · 低于整体均值' : filterMode==='cat' ? ' · 低于品类均值' : '';
   // 表头搜索过滤(负责人/品类/商品简称/计划名字/关键词) —— 与整体数据一致
   const fs = filterSearch;
   if(fs.owner || fs.cat || fs.short || fs.plan || fs.kw){
@@ -1317,7 +1256,7 @@ function renderFilterResult(){
   }
   const searchTxt = (fs.owner||fs.cat||fs.short||fs.plan||fs.kw) ? ' · 已按表头搜索过滤' : '';
   if(!rows.length){
-    hintEl.textContent = (hasFilter || searchTxt) ? `(筛选命中 0 行${modeTxt})` : `(所选日期范围内无数据)`;
+    hintEl.textContent = (hasFilter || searchTxt) ? `(筛选命中 0 行)` : `(所选日期范围内无数据)`;
     document.getElementById('filter-stats').innerHTML = '';
     document.getElementById('filter-body').innerHTML = `<div class="placeholder"><div class="icon">📅</div><h3>无数据</h3><p>请调整日期筛选或筛选条件</p></div>`;
     renderPager('filter-pager', 'filter', 0);
@@ -1342,7 +1281,7 @@ function renderFilterResult(){
   const SORT_LABEL = {kw:'关键词', spend:'消耗', roi:'总ROI', droi:'直接ROI', cpc:'CPC', cvr:'CVR', cartcost:'加购成本'};
   const sortTxt = filterSort.col ? ` · 已按「${SORT_LABEL[filterSort.col]||filterSort.col}」${filterSort.dir===1?'降序':'升序'}${sortActive?'(平铺明细)':''}` : '';
   hintEl.textContent = hasFilter
-    ? `(筛选命中 ${fmtInt(rows.length)} 行${modeTxt}${searchTxt}${sortTxt})`
+    ? `(筛选命中 ${fmtInt(rows.length)} 行${searchTxt}${sortTxt})`
     : `(未筛选, 显示全部 ${fmtInt(rows.length)} 行${searchTxt}${sortTxt})`;
   const agg = aggRow();
   for(const it of rows){ for(const k of AGG_KEYS) agg[k]+=it[k]; }
