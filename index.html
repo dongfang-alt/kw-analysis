@@ -584,7 +584,7 @@ let pageState = { overall:{page:1,size:500}, filter:{page:1,size:500} };
 let filterDebounce = null;
 let filterMode = null;        // 'account' | 'cat' | null  (默认选项: 低于均值)
 let catAggCache = null;       // Map<品类, agg> 品类聚合缓存
-let overallSearch = {owner:'', cat:'', short:''};   // 整体表头搜索(负责人/品类/商品简称)
+let overallSearch = {owner:'', cat:'', short:'', kw:''};  // 整体表头搜索(负责人/品类/商品简称/关键词)
 let overallSort = {col:null, dir:0};               // 整体排序: col=指标列, dir=1降序/-1升序/0无
 let overallDebounce = null;
 
@@ -669,7 +669,7 @@ function overallToolsHtml(){
     const arrow = so.col===col ? (so.dir===1?'▼':'▲') : '↕';
     return `<button class="tbl-sort${active}" onclick="toggleOverallSort('${col}')">${label}<span class="arrow">${arrow}</span></button>`;
   };
-  return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sortBtn('kw','关键词')}</td><td>${sortBtn('spend','消耗')}</td><td>${sortBtn('roi','总ROI')}</td><td>${sortBtn('droi','直接ROI')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cvr','CVR')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
+  return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','消耗')}</td><td>${sortBtn('roi','总ROI')}</td><td>${sortBtn('droi','直接ROI')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cvr','CVR')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
 }
 function scheduleOverallRefresh(){
   clearTimeout(overallDebounce);
@@ -1123,14 +1123,15 @@ function renderOverall(){
     renderPager('overall-pager', 'overall', 0);
     return;
   }
-  // 表头搜索过滤(负责人/品类/商品简称)
+  // 表头搜索过滤(负责人/品类/商品简称/关键词)
   let viewItems = items;
   const so = overallSearch;
-  if(so.owner || so.cat || so.short){
+  if(so.owner || so.cat || so.short || so.kw){
     viewItems = items.filter(it =>
       (!so.owner || (it.owner||'').indexOf(so.owner)>=0) &&
       (!so.cat || (it.cat||'').indexOf(so.cat)>=0) &&
-      (!so.short || (it.short||'').indexOf(so.short)>=0)
+      (!so.short || (it.short||'').indexOf(so.short)>=0) &&
+      (!so.kw || (it.kw||'').indexOf(so.kw)>=0)
     );
   }
   let spend=0, rev=0, drev=0, clicks=0, orders=0, cart=0, matched=0;
@@ -1156,7 +1157,6 @@ function renderOverall(){
     const col = overallSort.col, dir = overallSort.dir;
     const sorted = viewItems.slice().sort((x,y)=>{
       let vx, vy;
-      if(col==='kw'){ vx = x.kw||''; vy = y.kw||''; return dir * String(vx).localeCompare(String(vy), 'zh-CN'); }
       if(col==='spend'){ vx = x.spend; vy = y.spend; }
       else if(col==='roi'){ vx = calcRoi(x.rev,x.spend); vy = calcRoi(y.rev,y.spend); }
       else if(col==='droi'){ vx = calcRoi(x.drev,x.spend); vy = calcRoi(y.drev,y.spend); }
@@ -1172,7 +1172,7 @@ function renderOverall(){
   const catSet = new Set(), shortSet = new Set();
   for(const it of viewItems){ catSet.add(it.cat); shortSet.add(it.cat+'|'+it.short); }
   const dateTxt = (dateFrom || dateTo) ? ` · ${dateFrom||'最早'}~${dateTo||'最晚'}` : '';
-  const searchTxt = (so.owner||so.cat||so.short) ? ` · 已按关键词搜索` : '';
+  const searchTxt = (so.owner||so.cat||so.short||so.kw) ? ` · 已按搜索条件过滤` : '';
   const SORT_LABEL = {kw:'关键词', spend:'消耗', roi:'总ROI', droi:'直接ROI', cpc:'CPC', cvr:'CVR', cartcost:'加购成本'};
   const sortTxt = overallSort.col ? ` · 已按「${SORT_LABEL[overallSort.col]||overallSort.col}」${overallSort.dir===1?'降序':'升序'}${sortActive?'(平铺明细)':''}` : '';
   renderLevelTable(rows, body, 'overall-pager', 'overall', hintEl,
