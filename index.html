@@ -161,6 +161,7 @@
   <div class="tabs">
     <button class="tab active" data-tab="overall" onclick="switchTab('overall')">整体数据</button>
     <button class="tab" data-tab="filter" onclick="switchTab('filter')">筛选数据</button>
+    <button class="tab" data-tab="anomaly" onclick="switchTab('anomaly')">🚨 异常数据</button>
   </div>
   <div class="datebar-right">
     <div class="datebar-title">📅 日期筛选</div>
@@ -222,6 +223,29 @@
       <div class="stats-grid" id="filter-stats"></div>
       <div id="filter-body"></div>
       <div class="pager" id="filter-pager"></div>
+    </div>
+  </div>
+
+  <!-- 异常数据 -->
+  <div class="panel" id="panel-anomaly">
+    <div class="board-bar">
+      <span class="board-bar-title">🚨 异常数据</span>
+      <button class="btn btn-ghost btn-sm" onclick="exportReport('anomaly')">📥 报告下载</button>
+    </div>
+    <div class="card">
+      <div class="card-title">📉 异常分析选项</div>
+      <div class="filter-bar">
+        <button class="btn btn-ghost btn-sm" id="a-mode-slide" onclick="setAnomalyMode('slide')">📉 周期下滑 · 7天为一周期持续下滑</button>
+        <button class="btn btn-ghost btn-sm" id="a-mode-cat" onclick="setAnomalyMode('cat')">📉 低于品类均值 · 关键词ROI &lt; 品类汇总ROI</button>
+      </div>
+      <div id="a-mode-tip"></div>
+    </div>
+    <div id="anomaly-empty" class="empty hidden">请先导入数据</div>
+    <div class="card hidden" id="anomaly-result-card">
+      <div class="card-title">🔎 分析结果 <span class="muted" id="anomaly-hint"></span></div>
+      <div class="stats-grid" id="anomaly-stats"></div>
+      <div id="anomaly-body"></div>
+      <div class="pager" id="anomaly-pager"></div>
     </div>
   </div>
 </div>
@@ -573,8 +597,9 @@ let dataset = null;           // {items, meta}
 let pendingWorkbook = null;   // {file, sheetNames, dataItems, dataSkips, ownerMap, ownerRows, dataSheet, mapSheet}
 let dateFrom = '';            // 日期筛选: 起始(YYYY-MM-DD, 空=不限)
 let dateTo = '';              // 日期筛选: 结束(YYYY-MM-DD, 空=不限)
-let pageState = { overall:{page:1,size:500}, filter:{page:1,size:500} };
+let pageState = { overall:{page:1,size:500}, filter:{page:1,size:500}, anomaly:{page:1,size:500} };
 let filterDebounce = null;
+let anomalyMode = 'slide';            // 异常数据: 'slide' 周期下滑 | 'cat' 低于品类均值
 let overallSearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 整体表头搜索(负责人/品类/商品简称/计划名字/关键词)
 let overallSort = {col:null, dir:0};               // 整体排序: col=指标列, dir=1降序/-1升序/0无
 let overallDebounce = null;
@@ -1036,6 +1061,8 @@ function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
   document.getElementById('panel-overall').classList.toggle('active', name==='overall');
   document.getElementById('panel-filter').classList.toggle('active', name==='filter');
+  const pa = document.getElementById('panel-anomaly');
+  if(pa) pa.classList.toggle('active', name==='anomaly');
 }
 
 /* ---------- 渲染 ---------- */
@@ -1109,6 +1136,7 @@ function updateDateHint(){
 function renderAll(){
   renderOverall();
   renderFilterResult();
+  renderAnomaly();
 }
 function renderOverall(){
   const statsBox = document.getElementById('overall-stats');
@@ -1297,6 +1325,159 @@ function renderFilterResult(){
   renderLevelTable(lvRows, document.getElementById('filter-body'), 'filter-pager', 'filter', hintEl, hintEl.textContent, filterToolsHtml());
 }
 
+/* ---------- 异常数据 ---------- */
+// 'YYYY-MM-DD' 天数差 (b - a)
+function dayDiff(a, b){
+  const pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  return Math.round((Date.UTC(pb[0],pb[1]-1,pb[2]) - Date.UTC(pa[0],pa[1]-1,pa[2])) / 86400000);
+}
+// 周期下滑: 7天为一周期, 关键词每周期成交金额持续递减
+function buildSlideAnalysis(){
+  const items = dateFilteredItems();
+  const kwMap = new Map();
+  for(const it of items){
+    if(!it.kw || !it.date) continue;
+    if(!kwMap.has(it.kw)) kwMap.set(it.kw, []);
+    kwMap.get(it.kw).push(it);
+  }
+  const results = [];
+  for(const [kw, list] of kwMap){
+    list.sort((a,b)=> a.date < b.date ? -1 : 1);
+    const minD = list[0].date;
+    const periods = new Map();   // periodIdx -> aggRow
+    for(const it of list){
+      const pIdx = Math.floor(dayDiff(minD, it.date) / 7);
+      if(!periods.has(pIdx)) periods.set(pIdx, aggRow());
+      const a = periods.get(pIdx);
+      for(const k of AGG_KEYS) a[k] += it[k];
+    }
+    const keys = [...periods.keys()].sort((a,b)=>a-b);
+    if(keys.length < 2) continue;   // 至少 2 个周期才有"下滑"可言
+    let sliding = true;
+    for(let i=1;i<keys.length;i++){
+      const prev = periods.get(keys[i-1]).rev;
+      const cur = periods.get(keys[i]).rev;
+      if(!(cur < prev)){ sliding = false; break; }
+    }
+    if(!sliding) continue;
+    const agg = aggRow();
+    for(const it of list) for(const k of AGG_KEYS) agg[k] += it[k];
+    const lastP = periods.get(keys[keys.length-1]);
+    const prevP = periods.get(keys[keys.length-2]);
+    results.push({kw, owner:list[0].owner, cat:list[0].cat, plan:list[0].plan, periods:keys.length,
+      lastRev:lastP.rev, prevRev:prevP.rev, agg});
+  }
+  return results;
+}
+// 低于品类均值: 品类汇总ROI = 汇总成交/汇总花费, 筛出关键词ROI < 品类汇总ROI 的关键词
+function buildCatRoiAnalysis(){
+  const items = dateFilteredItems();
+  const catAgg = new Map(), kwAgg = new Map();
+  for(const it of items){
+    if(!it.kw) continue;
+    if(!catAgg.has(it.cat)) catAgg.set(it.cat, aggRow());
+    const ca = catAgg.get(it.cat);
+    if(!kwAgg.has(it.kw)) kwAgg.set(it.kw, {agg:aggRow(), cat:it.cat, owner:it.owner, plan:it.plan});
+    const ka = kwAgg.get(it.kw).agg;
+    for(const k of AGG_KEYS){ ca[k]+=it[k]; ka[k]+=it[k]; }
+  }
+  const results = [];
+  for(const [kw, info] of kwAgg){
+    const ca = catAgg.get(info.cat);
+    if(!ca || !ca.spend || !info.agg.spend) continue;   // 无消耗无法算ROI
+    const catRoi = ca.rev / ca.spend;
+    const kwRoi = info.agg.rev / info.agg.spend;
+    if(kwRoi < catRoi) results.push({kw, owner:info.owner, cat:info.cat, plan:info.plan, catRoi, kwRoi, agg:info.agg});
+  }
+  results.sort((a,b)=> (a.kwRoi - a.catRoi) - (b.kwRoi - b.catRoi));   // 差距最大(最差)在前
+  return results;
+}
+function setAnomalyMode(mode){
+  anomalyMode = mode;
+  document.getElementById('a-mode-slide').classList.toggle('active', anomalyMode==='slide');
+  document.getElementById('a-mode-cat').classList.toggle('active', anomalyMode==='cat');
+  const tips = {slide:'周期下滑：以 7 天为一周期, 关键词每周期成交金额持续递减', cat:'低于品类均值：品类汇总ROI = 汇总成交 ÷ 汇总花费, 筛选出关键词ROI 低于所属品类汇总ROI 的数据'};
+  const tipEl = document.getElementById('a-mode-tip');
+  if(tipEl) tipEl.innerHTML = `<span class="filter-mode-tip">${tips[mode]}</span>`;
+  pageState.anomaly.page = 1;
+  renderAnomaly();
+}
+function renderAnomaly(){
+  const card = document.getElementById('anomaly-result-card');
+  const emptyBox = document.getElementById('anomaly-empty');
+  const statsBox = document.getElementById('anomaly-stats');
+  const body = document.getElementById('anomaly-body');
+  const hintEl = document.getElementById('anomaly-hint');
+  // 同步选项按钮状态与提示(即使无数据也正确显示)
+  const b1 = document.getElementById('a-mode-slide'), b2 = document.getElementById('a-mode-cat');
+  if(b1){ b1.classList.toggle('active', anomalyMode==='slide'); b2.classList.toggle('active', anomalyMode==='cat'); }
+  const tipEl = document.getElementById('a-mode-tip');
+  if(tipEl){
+    const tips = {slide:'周期下滑：以 7 天为一周期, 关键词每周期成交金额持续递减', cat:'低于品类均值：品类汇总ROI = 汇总成交 ÷ 汇总花费, 筛选出关键词ROI 低于所属品类汇总ROI 的数据'};
+    tipEl.innerHTML = `<span class="filter-mode-tip">${tips[anomalyMode]}</span>`;
+  }
+  if(!dataset || !dataset.items.length){
+    card.classList.add('hidden');
+    if(emptyBox) emptyBox.classList.remove('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+  if(emptyBox) emptyBox.classList.add('hidden');
+  const rows = anomalyMode==='slide' ? buildSlideAnalysis() : buildCatRoiAnalysis();
+  if(!rows.length){
+    hintEl.textContent = anomalyMode==='slide' ? '(无持续下滑的关键词)' : '(无低于品类均值的关键词)';
+    statsBox.innerHTML = '';
+    body.innerHTML = `<div class="placeholder"><div class="icon">📉</div><h3>无异常数据</h3><p>当前条件下没有命中异常关键词</p></div>`;
+    renderPager('anomaly-pager', 'anomaly', 0);
+    return;
+  }
+  // KPI 统计
+  if(anomalyMode==='slide'){
+    let spend=0, rev=0;
+    for(const r of rows){ spend+=r.agg.spend; rev+=r.agg.rev; }
+    const catSet = new Set(rows.map(r=>r.cat));
+    statsBox.innerHTML = [
+      ['下滑关键词', fmtInt(rows.length), 'primary'],
+      ['涉及品类', fmtInt(catSet.size), ''],
+      ['总消耗', fmt(spend), ''],
+      ['总成交', fmt(rev), ''],
+      ['总ROI', fmt(calcRoi(rev,spend)), roiClass(calcRoi(rev,spend))]
+    ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+  }else{
+    const catSet = new Set(rows.map(r=>r.cat));
+    statsBox.innerHTML = [
+      ['异常关键词', fmtInt(rows.length), 'primary'],
+      ['涉及品类', fmtInt(catSet.size), '']
+    ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+  }
+  // 表格(分页)
+  const st = pageState.anomaly;
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total/st.size));
+  if(st.page > pages) st.page = pages;
+  if(st.page < 1) st.page = 1;
+  const slice = rows.slice((st.page-1)*st.size, st.page*st.size);
+  let head, trs;
+  if(anomalyMode==='slide'){
+    head = `<tr><th>关键词</th><th>负责人</th><th>品类</th><th>计划名字</th><th>周期数</th><th>最近周期成交</th><th>上周期成交</th><th>环比</th><th>总成交</th><th>总消耗</th><th>总ROI</th></tr>`;
+    trs = slice.map(r=>{
+      const chg = r.prevRev ? (r.lastRev - r.prevRev)/r.prevRev*100 : (r.lastRev ? -100 : 0);
+      return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num">${r.periods}</td><td class="num">${fmt(r.lastRev)}</td><td class="num">${fmt(r.prevRev)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td><td class="num">${fmt(r.agg.rev)}</td><td class="num">${fmt(r.agg.spend)}</td><td class="num ${roiClass(calcRoi(r.agg.rev,r.agg.spend))}">${fmt(calcRoi(r.agg.rev,r.agg.spend))}</td></tr>`;
+    }).join('');
+  }else{
+    head = `<tr><th>关键词</th><th>负责人</th><th>品类</th><th>计划名字</th><th>关键词ROI</th><th>品类汇总ROI</th><th>差值</th><th>总消耗</th><th>总成交</th><th>点击量</th><th>订单量</th></tr>`;
+    trs = slice.map(r=>{
+      const diff = r.kwRoi - r.catRoi;
+      return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num roi-bad">${fmt(r.kwRoi)}</td><td class="num">${fmt(r.catRoi)}</td><td class="num roi-bad">${fmt(diff)}</td><td class="num">${fmt(r.agg.spend)}</td><td class="num">${fmt(r.agg.rev)}</td><td class="num">${fmtInt(r.agg.clicks)}</td><td class="num">${fmtInt(r.agg.orders)}</td></tr>`;
+    }).join('');
+  }
+  hintEl.textContent = anomalyMode==='slide'
+    ? `(命中 ${fmtInt(total)} 个持续下滑关键词 · 7天周期成交逐期递减)`
+    : `(命中 ${fmtInt(total)} 个低于品类均值的关键词 · 按差距升序)`;
+  body.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${trs}</tbody></table></div>`;
+  renderPager('anomaly-pager', 'anomaly', total);
+}
+
 /* ---------- 分页条 ---------- */
 function renderPager(containerId, key, total){
   const el = document.getElementById(containerId);
@@ -1356,9 +1537,33 @@ window.addEventListener('drop', async e=>{
 });
 
 /* ---------- 报告下载 ---------- */
-// mode: 'overall' 整体数据(全部) / 'filter' 筛选数据(当前筛选结果)
+// mode: 'overall' 整体数据(全部) / 'filter' 筛选数据(当前筛选结果) / 'anomaly' 异常数据(当前分析模式)
 function exportReport(mode){
   if(!dataset || !dataset.items.length){ toast('暂无数据可导出'); return; }
+  // 异常数据: 按当前分析模式导出
+  if(mode === 'anomaly'){
+    if(anomalyMode==='slide'){
+      const ar = buildSlideAnalysis();
+      const header = ['关键词','负责人','品类','计划名字','周期数','最近周期成交','上周期成交','环比(%)','总成交','总消耗','总ROI'];
+      const lines = [header.join(',')];
+      for(const r of ar){
+        const chg = r.prevRev ? ((r.lastRev - r.prevRev)/r.prevRev*100).toFixed(1) : '-100.0';
+        lines.push([csvCell(r.kw), csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), r.periods, r.lastRev.toFixed(2), r.prevRev.toFixed(2), chg, r.agg.rev.toFixed(2), r.agg.spend.toFixed(2), calcRoi(r.agg.rev,r.agg.spend).toFixed(2)].join(','));
+      }
+      download('关键词分析_周期下滑_报告.csv', '\ufeff' + lines.join('\n'));
+      toast('📥 报告已下载(' + ar.length + ' 行)');
+    }else{
+      const ar = buildCatRoiAnalysis();
+      const header = ['关键词','负责人','品类','计划名字','关键词ROI','品类汇总ROI','差值','总消耗','总成交','点击量','订单量'];
+      const lines = [header.join(',')];
+      for(const r of ar){
+        lines.push([csvCell(r.kw), csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), r.kwRoi.toFixed(2), r.catRoi.toFixed(2), (r.kwRoi-r.catRoi).toFixed(2), r.agg.spend.toFixed(2), r.agg.rev.toFixed(2), r.agg.clicks, r.agg.orders].join(','));
+      }
+      download('关键词分析_低于品类均值_报告.csv', '\ufeff' + lines.join('\n'));
+      toast('📥 报告已下载(' + ar.length + ' 行)');
+    }
+    return;
+  }
   let rows, suffix = '全部';
   if(mode === 'filter'){
     const {items, hasFilter} = getFiltered();
