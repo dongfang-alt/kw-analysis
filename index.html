@@ -84,6 +84,17 @@
   thead th:nth-child(1),thead th:nth-child(2),thead th:nth-child(3),thead th:nth-child(4){min-width:100px;}
   .lv-dot{color:#6366F1;margin-right:4px;}
   .lv-cat .lv-dot{color:#4F46E5;}
+  /* 表头第二行: 搜索 + 排序 */
+  tr.tbl-tools td{padding:6px 8px;background:#F8FAFC;border-bottom:1px solid #E2E8F0;}
+  tr.tbl-tools td:hover{background:#F8FAFC;}
+  .tbl-search{width:100%;min-width:70px;height:26px;border:1px solid #CBD5E1;border-radius:6px;padding:0 6px;font-size:12px;background:#fff;color:#1E293B;}
+  .tbl-search:focus{outline:2px solid #C7D2FE;border-color:#6366F1;}
+  .tbl-sort{display:inline-flex;align-items:center;gap:3px;height:26px;border:1px solid #CBD5E1;border-radius:6px;padding:0 8px;font-size:12px;background:#fff;color:#475569;cursor:pointer;transition:.15s;font-weight:600;white-space:nowrap;}
+  .tbl-sort:hover{border-color:#6366F1;color:#4F46E5;}
+  .tbl-sort.active{background:#6366F1;color:#fff;border-color:#6366F1;}
+  .tbl-sort.active:hover{background:#4F46E5;color:#fff;}
+  .tbl-sort .arrow{font-size:10px;opacity:.85;}
+  .tbl-tooltip{font-size:11px;color:#94A3B8;margin-left:6px;font-weight:400;}
   /* 按钮选中态 */
   .btn.active{background:#6366F1;color:#fff;border-color:#6366F1;}
   .btn.active:hover{background:#4F46E5;color:#fff;}
@@ -567,12 +578,15 @@ async function dbClear(){
 /* ---------- 全局状态 ---------- */
 let dataset = null;           // {items, meta}
 let pendingWorkbook = null;   // {file, sheetNames, dataItems, dataSkips, ownerMap, ownerRows, dataSheet, mapSheet}
-let dateFrom = '';            // 日期筛选: 开始(YYYY-MM-DD, 空=不限)
+let dateFrom = '';            // 日期筛选: 起始(YYYY-MM-DD, 空=不限)
 let dateTo = '';              // 日期筛选: 结束(YYYY-MM-DD, 空=不限)
 let pageState = { overall:{page:1,size:500}, filter:{page:1,size:500} };
 let filterDebounce = null;
 let filterMode = null;        // 'account' | 'cat' | null  (默认选项: 低于均值)
 let catAggCache = null;       // Map<品类, agg> 品类聚合缓存
+let overallSearch = {owner:'', cat:'', short:''};   // 整体表头搜索(负责人/品类/商品简称)
+let overallSort = {col:null, dir:0};               // 整体排序: col=指标列, dir=1降序/-1升序/0无
+let overallDebounce = null;
 
 /* ---------- 层级表工具 ---------- */
 const AGG_KEYS = ['spend','rev','drev','clicks','orders','cart'];
@@ -623,8 +637,8 @@ function metricCells(agg){
     <td class="num">${fmt(calcCvr(agg.orders,agg.clicks),1)}%</td>
     <td class="num">${fmt(calcCartCost(agg.spend,agg.cart))}</td>`;
 }
-// 层级表渲染(共用: 整体/筛选), 分页按渲染行数
-function renderLevelTable(rows, bodyEl, pagerId, pageKey, hintEl, hintText){
+// 层级表渲染(共用: 整体/筛选), 分页按渲染行数; toolsHtml=表头第二行(搜索+排序), 无则不加
+function renderLevelTable(rows, bodyEl, pagerId, pageKey, hintEl, hintText, toolsHtml){
   const total = rows.length;
   const st = pageState[pageKey];
   const pages = Math.max(1, Math.ceil(total/st.size));
@@ -641,10 +655,33 @@ function renderLevelTable(rows, bodyEl, pagerId, pageKey, hintEl, hintText){
     return `<tr><td class="lv-dim">${esc(it.owner)}</td><td class="lv-dim">${esc(it.cat)}</td><td class="lv-dim">${esc(it.short)||'—'}</td><td class="lv-name">${esc(it.kw)||'—'}</td>${metricCells(it)}</tr>`;
   }).join('');
   bodyEl.innerHTML = `<div class="tbl-wrap"><table class="tbl">
-    <thead><tr><th>负责人</th><th>品类</th><th>商品简称</th><th>关键词</th><th>消耗</th><th>总ROI</th><th>直接ROI</th><th>CPC</th><th>CVR</th><th>加购成本</th></tr></thead>
+    <thead><tr><th>负责人</th><th>品类</th><th>商品简称</th><th>关键词</th><th>消耗</th><th>总ROI</th><th>直接ROI</th><th>CPC</th><th>CVR</th><th>加购成本</th></tr>${toolsHtml?`<tr class="tbl-tools">${toolsHtml}</tr>`:''}</thead>
     <tbody>${trs}</tbody></table></div>`;
   if(hintEl) hintEl.textContent = hintText;
   renderPager(pagerId, pageKey, total);
+}
+/* ---------- 整体表头: 搜索 + 排序 ---------- */
+function overallToolsHtml(){
+  const s = overallSearch, so = overallSort;
+  const sIn = (f, ph) => `<input class="tbl-search" placeholder="${ph}" value="${esc(s[f])}" oninput="overallSearch.${f}=this.value;scheduleOverallRefresh()">`;
+  const sortBtn = (col, label) => {
+    const active = so.col===col ? ' active' : '';
+    const arrow = so.col===col ? (so.dir===1?'▼':'▲') : '↕';
+    return `<button class="tbl-sort${active}" onclick="toggleOverallSort('${col}')">${label}<span class="arrow">${arrow}</span></button>`;
+  };
+  return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sortBtn('kw','关键词')}</td><td>${sortBtn('spend','消耗')}</td><td>${sortBtn('roi','总ROI')}</td><td>${sortBtn('droi','直接ROI')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cvr','CVR')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
+}
+function scheduleOverallRefresh(){
+  clearTimeout(overallDebounce);
+  overallDebounce = setTimeout(()=>{ pageState.overall.page = 1; renderOverall(); }, 300);
+}
+function toggleOverallSort(col){
+  const so = overallSort;
+  if(so.col !== col){ so.col = col; so.dir = 1; }
+  else if(so.dir === 1){ so.dir = -1; }
+  else { so.col = null; so.dir = 0; }
+  pageState.overall.page = 1;
+  renderOverall();
 }
 
 /* ---------- 总表解析(内含「单品」「个人」子表格, 自动识别) ---------- */
@@ -1086,14 +1123,24 @@ function renderOverall(){
     renderPager('overall-pager', 'overall', 0);
     return;
   }
+  // 表头搜索过滤(负责人/品类/商品简称)
+  let viewItems = items;
+  const so = overallSearch;
+  if(so.owner || so.cat || so.short){
+    viewItems = items.filter(it =>
+      (!so.owner || (it.owner||'').indexOf(so.owner)>=0) &&
+      (!so.cat || (it.cat||'').indexOf(so.cat)>=0) &&
+      (!so.short || (it.short||'').indexOf(so.short)>=0)
+    );
+  }
   let spend=0, rev=0, drev=0, clicks=0, orders=0, cart=0, matched=0;
-  for(const it of items){
+  for(const it of viewItems){
     spend+=it.spend; rev+=it.rev; drev+=it.drev; clicks+=it.clicks; orders+=it.orders; cart+=it.cart;
     if(it.owner!=='未分配') matched++;
   }
   const a = {spend, rev, drev, clicks, orders, cart};
   statsBox.innerHTML = [
-    ['数据行数', fmtInt(items.length), 'primary'],
+    ['数据行数', fmtInt(viewItems.length), 'primary'],
     ['总消耗', fmt(a.spend), ''],
     ['总成交金额', fmt(a.rev), ''],
     ['总ROI', fmt(calcRoi(a.rev,a.spend)), roiClass(calcRoi(a.rev,a.spend))],
@@ -1102,14 +1149,35 @@ function renderOverall(){
     ['CVR', fmt(calcCvr(a.orders,a.clicks),1)+'%', ''],
     ['加购成本', fmt(calcCartCost(a.spend,a.cart)), '']
   ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
-  const rows = buildLevelRows(items);
+  // 表头排序(对明细排序后重建层级)
+  let rows;
+  if(overallSort.col){
+    const col = overallSort.col, dir = overallSort.dir;
+    const sorted = viewItems.slice().sort((x,y)=>{
+      let vx, vy;
+      if(col==='kw'){ vx = x.kw||''; vy = y.kw||''; return dir * String(vx).localeCompare(String(vy), 'zh-CN'); }
+      if(col==='spend'){ vx = x.spend; vy = y.spend; }
+      else if(col==='roi'){ vx = calcRoi(x.rev,x.spend); vy = calcRoi(y.rev,y.spend); }
+      else if(col==='droi'){ vx = calcRoi(x.drev,x.spend); vy = calcRoi(y.drev,y.spend); }
+      else if(col==='cpc'){ vx = calcCpc(x.spend,x.clicks); vy = calcCpc(y.spend,y.clicks); }
+      else if(col==='cvr'){ vx = calcCvr(x.orders,x.clicks); vy = calcCvr(y.orders,y.clicks); }
+      else if(col==='cartcost'){ vx = calcCartCost(x.spend,x.cart); vy = calcCartCost(y.spend,y.cart); }
+      return (vx - vy) * dir;
+    });
+    rows = buildLevelRows(sorted);
+  }else{
+    rows = buildLevelRows(viewItems);
+  }
   const catSet = new Set(), shortSet = new Set();
-  for(const it of items){ catSet.add(it.cat); shortSet.add(it.cat+'|'+it.short); }
+  for(const it of viewItems){ catSet.add(it.cat); shortSet.add(it.cat+'|'+it.short); }
   const dateTxt = (dateFrom || dateTo) ? ` · ${dateFrom||'最早'}~${dateTo||'最晚'}` : '';
+  const searchTxt = (so.owner||so.cat||so.short) ? ` · 已按关键词搜索` : '';
+  const sortTxt = overallSort.col ? ` · 已按${overallSort.col}${overallSort.dir===1?'降序':'升序'}` : '';
   renderLevelTable(rows, body, 'overall-pager', 'overall', hintEl,
-    `(共 ${fmtInt(items.length)} 行关键词 · ${fmtInt(catSet.size)} 个品类 · ${fmtInt(shortSet.size)} 个商品 · 关联负责人 ${fmtInt(matched)} 个${dateTxt})`);
+    `(共 ${fmtInt(viewItems.length)} 行关键词 · ${fmtInt(catSet.size)} 个品类 · ${fmtInt(shortSet.size)} 个商品 · 关联负责人 ${fmtInt(matched)} 个${dateTxt}${searchTxt}${sortTxt})`,
+    overallToolsHtml());
 }
-
+ 
 /* ---------- 筛选 ---------- */
 function renderFilterModeTip(el){
   const tips = {account:'账户维度：筛选 总ROI < 整体均值 的数据', cat:'品类维度：筛选 总ROI < 所属品类均值 的数据'};
