@@ -596,6 +596,9 @@ let catAggCache = null;       // Map<品类, agg> 品类聚合缓存
 let overallSearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 整体表头搜索(负责人/品类/商品简称/计划名字/关键词)
 let overallSort = {col:null, dir:0};               // 整体排序: col=指标列, dir=1降序/-1升序/0无
 let overallDebounce = null;
+let filterSearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 筛选表头搜索(与整体数据同步功能)
+let filterSort = {col:null, dir:0};                // 筛选排序: 同上
+let filterDebounce2 = null;
 
 /* ---------- 层级表工具 ---------- */
 const AGG_KEYS = ['spend','rev','drev','clicks','orders','cart'];
@@ -673,20 +676,28 @@ function renderLevelTable(rows, bodyEl, pagerId, pageKey, hintEl, hintText, tool
   if(hintEl) hintEl.textContent = hintText;
   renderPager(pagerId, pageKey, total);
 }
-/* ---------- 整体表头: 搜索 + 排序 ---------- */
-function overallToolsHtml(){
-  const s = overallSearch, so = overallSort;
-  const sIn = (f, ph) => `<input class="tbl-search" placeholder="${ph}" value="${esc(s[f])}" oninput="overallSearch.${f}=this.value;scheduleOverallRefresh()">`;
+/* ---------- 表头工具行: 搜索 + 排序 (整体/筛选共用, 保证两 Tab 功能一致) ---------- */
+function levelToolsHtml(search, sort, inputFn, toggleFn){
+  const s = search, so = sort;
+  const sIn = (f, ph) => `<input class="tbl-search" placeholder="${ph}" value="${esc(s[f])}" oninput="${inputFn}('${f}',this.value)">`;
   const sortBtn = (col, label) => {
     const active = so.col===col ? ' active' : '';
     const arrow = so.col===col ? (so.dir===1?'▼':'▲') : '↕';
-    return `<button class="tbl-sort${active}" onclick="toggleOverallSort('${col}')">${label}<span class="arrow">${arrow}</span></button>`;
+    return `<button class="tbl-sort${active}" onclick="${toggleFn}('${col}')">${label}<span class="arrow">${arrow}</span></button>`;
   };
   return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','消耗')}</td><td>${sortBtn('roi','总ROI')}</td><td>${sortBtn('droi','直接ROI')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cvr','CVR')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
 }
+function overallToolsHtml(){ return levelToolsHtml(overallSearch, overallSort, 'overallSearchInput', 'toggleOverallSort'); }
+function filterToolsHtml(){ return levelToolsHtml(filterSearch, filterSort, 'filterSearchInput', 'toggleFilterSort'); }
+function overallSearchInput(f, v){ overallSearch[f] = v; scheduleOverallRefresh(); }
+function filterSearchInput(f, v){ filterSearch[f] = v; scheduleFilterRefresh(); }
 function scheduleOverallRefresh(){
   clearTimeout(overallDebounce);
   overallDebounce = setTimeout(()=>{ pageState.overall.page = 1; renderOverall(); }, 300);
+}
+function scheduleFilterRefresh(){
+  clearTimeout(filterDebounce2);
+  filterDebounce2 = setTimeout(()=>{ pageState.filter.page = 1; renderFilterResult(); }, 300);
 }
 function toggleOverallSort(col){
   const so = overallSort;
@@ -695,6 +706,14 @@ function toggleOverallSort(col){
   else { so.col = null; so.dir = 0; }
   pageState.overall.page = 1;
   renderOverall();
+}
+function toggleFilterSort(col){
+  const so = filterSort;
+  if(so.col !== col){ so.col = col; so.dir = 1; }
+  else if(so.dir === 1){ so.dir = -1; }
+  else { so.col = null; so.dir = 0; }
+  pageState.filter.page = 1;
+  renderFilterResult();
 }
 
 /* ---------- 总表解析(内含「单品」「个人」子表格, 自动识别) ---------- */
@@ -1306,6 +1325,8 @@ function resetFilter(){
   document.getElementById('f-mode-account').classList.remove('active');
   document.getElementById('f-mode-cat').classList.remove('active');
   renderFilterModeTip(document.getElementById('f-mode-tip'));
+  filterSearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 表头搜索/排序一并重置
+  filterSort = {col:null, dir:0};
   pageState.filter.page = 1;
   renderFilterResult();
 }
@@ -1315,19 +1336,49 @@ function renderFilterResult(){
   card.classList.remove('hidden');
   const {items, hasFilter} = getFiltered();
   const base = dateFilteredItems();
-  const rows = hasFilter ? items : base;
+  let rows = hasFilter ? items : base;
   const hintEl = document.getElementById('filter-hint');
   const modeTxt = filterMode==='account' ? ' · 低于整体均值' : filterMode==='cat' ? ' · 低于品类均值' : '';
+  // 表头搜索过滤(负责人/品类/商品简称/计划名字/关键词) —— 与整体数据一致
+  const fs = filterSearch;
+  if(fs.owner || fs.cat || fs.short || fs.plan || fs.kw){
+    rows = rows.filter(it =>
+      (!fs.owner || (it.owner||'').indexOf(fs.owner)>=0) &&
+      (!fs.cat || (it.cat||'').indexOf(fs.cat)>=0) &&
+      (!fs.short || (it.short||'').indexOf(fs.short)>=0) &&
+      (!fs.plan || (it.plan||'').indexOf(fs.plan)>=0) &&
+      (!fs.kw || (it.kw||'').indexOf(fs.kw)>=0)
+    );
+  }
+  const searchTxt = (fs.owner||fs.cat||fs.short||fs.plan||fs.kw) ? ' · 已按表头搜索过滤' : '';
   if(!rows.length){
-    hintEl.textContent = hasFilter
-      ? `(筛选命中 0 行${modeTxt})` : `(所选日期范围内无数据)`;
+    hintEl.textContent = (hasFilter || searchTxt) ? `(筛选命中 0 行${modeTxt})` : `(所选日期范围内无数据)`;
     document.getElementById('filter-stats').innerHTML = '';
     document.getElementById('filter-body').innerHTML = `<div class="placeholder"><div class="icon">📅</div><h3>无数据</h3><p>请调整日期筛选或筛选条件</p></div>`;
     renderPager('filter-pager', 'filter', 0);
     return;
   }
+  // 表头排序: 激活时切换为平铺明细视图 —— 与整体数据一致
+  let sortActive = false;
+  if(filterSort.col){
+    sortActive = true;
+    const col = filterSort.col, dir = filterSort.dir;
+    rows = rows.slice().sort((x,y)=>{
+      let vx, vy;
+      if(col==='spend'){ vx = x.spend; vy = y.spend; }
+      else if(col==='roi'){ vx = calcRoi(x.rev,x.spend); vy = calcRoi(y.rev,y.spend); }
+      else if(col==='droi'){ vx = calcRoi(x.drev,x.spend); vy = calcRoi(y.drev,y.spend); }
+      else if(col==='cpc'){ vx = calcCpc(x.spend,x.clicks); vy = calcCpc(y.spend,y.clicks); }
+      else if(col==='cvr'){ vx = calcCvr(x.orders,x.clicks); vy = calcCvr(y.orders,y.clicks); }
+      else if(col==='cartcost'){ vx = calcCartCost(x.spend,x.cart); vy = calcCartCost(y.spend,y.cart); }
+      return (vy - vx) * dir;   // dir=1: 降序(大在前) ▼ / dir=-1: 升序(小在前) ▲
+    });
+  }
+  const SORT_LABEL = {kw:'关键词', spend:'消耗', roi:'总ROI', droi:'直接ROI', cpc:'CPC', cvr:'CVR', cartcost:'加购成本'};
+  const sortTxt = filterSort.col ? ` · 已按「${SORT_LABEL[filterSort.col]||filterSort.col}」${filterSort.dir===1?'降序':'升序'}${sortActive?'(平铺明细)':''}` : '';
   hintEl.textContent = hasFilter
-    ? `(筛选命中 ${fmtInt(rows.length)} 行${modeTxt})` : `(未筛选, 显示全部 ${fmtInt(rows.length)} 行)`;
+    ? `(筛选命中 ${fmtInt(rows.length)} 行${modeTxt}${searchTxt}${sortTxt})`
+    : `(未筛选, 显示全部 ${fmtInt(rows.length)} 行${searchTxt}${sortTxt})`;
   const agg = aggRow();
   for(const it of rows){ for(const k of AGG_KEYS) agg[k]+=it[k]; }
   document.getElementById('filter-stats').innerHTML = [
@@ -1338,8 +1389,8 @@ function renderFilterResult(){
     ['CVR', fmt(calcCvr(agg.orders,agg.clicks),1)+'%', ''],
     ['加购成本', fmt(calcCartCost(agg.spend,agg.cart)), '']
   ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
-  const lvRows = buildLevelRows(rows);
-  renderLevelTable(lvRows, document.getElementById('filter-body'), 'filter-pager', 'filter', hintEl, hintEl.textContent);
+  const lvRows = sortActive ? rows.map(it => ({type:'kw', it})) : buildLevelRows(rows);
+  renderLevelTable(lvRows, document.getElementById('filter-body'), 'filter-pager', 'filter', hintEl, hintEl.textContent, filterToolsHtml());
 }
 
 /* ---------- 分页条 ---------- */
@@ -1407,8 +1458,20 @@ function exportReport(mode){
   let rows, suffix = '全部';
   if(mode === 'filter'){
     const {items, hasFilter} = getFiltered();
-    rows = hasFilter ? items : dataset.items;
-    suffix = hasFilter ? '筛选结果' : '全部';
+    let fr = hasFilter ? items : dataset.items;
+    // 表头搜索(与筛选数据看板工具行一致)
+    const fs = filterSearch;
+    if(fs.owner || fs.cat || fs.short || fs.plan || fs.kw){
+      fr = fr.filter(it =>
+        (!fs.owner || (it.owner||'').indexOf(fs.owner)>=0) &&
+        (!fs.cat || (it.cat||'').indexOf(fs.cat)>=0) &&
+        (!fs.short || (it.short||'').indexOf(fs.short)>=0) &&
+        (!fs.plan || (it.plan||'').indexOf(fs.plan)>=0) &&
+        (!fs.kw || (it.kw||'').indexOf(fs.kw)>=0)
+      );
+    }
+    rows = fr;
+    suffix = (hasFilter || fs.owner || fs.cat || fs.short || fs.plan || fs.kw) ? '筛选结果' : '全部';
   }else{
     rows = dataset.items;
   }
