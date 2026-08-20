@@ -81,7 +81,7 @@
   table.tbl tr.lv-cat:hover td,table.tbl tr.lv-short:hover td{background:#EEF2FF;}
   td.lv-name{min-width:180px;font-weight:600;}
   td.lv-dim{min-width:110px;color:#94A3B8;font-weight:400;}
-  thead th:nth-child(1),thead th:nth-child(2),thead th:nth-child(3),thead th:nth-child(4){min-width:100px;}
+  thead th:nth-child(1),thead th:nth-child(2),thead th:nth-child(3),thead th:nth-child(4),thead th:nth-child(5){min-width:100px;}
   .lv-dot{color:#6366F1;margin-right:4px;}
   .lv-cat .lv-dot{color:#4F46E5;}
   /* 表头第二行: 搜索 + 排序 (整体数据中工具行即表头, 需 sticky 固定) */
@@ -378,6 +378,7 @@ const COL = {
   owner: ['负责人','运营','owner','推广人','操作人','负责人ID','运营负责人'],
   cat:   ['品类','类目','category','商品品类','分类','产品品类','所属品类'],
   short: ['商品简称','简称','商品名','名称','商品名称','产品简称'],
+  plan:  ['计划名字','计划名称','计划名','计划','plan','plan_name','推广计划','投放计划','计划标题'],
   date:  ['日期','date','时间','投放日期','统计日期','数据日期','day']
 };
 
@@ -592,7 +593,7 @@ let pageState = { overall:{page:1,size:500}, filter:{page:1,size:500} };
 let filterDebounce = null;
 let filterMode = null;        // 'account' | 'cat' | null  (默认选项: 低于均值)
 let catAggCache = null;       // Map<品类, agg> 品类聚合缓存
-let overallSearch = {owner:'', cat:'', short:'', kw:''};  // 整体表头搜索(负责人/品类/商品简称/关键词)
+let overallSearch = {owner:'', cat:'', short:'', plan:'', kw:''};  // 整体表头搜索(负责人/品类/商品简称/计划名字/关键词)
 let overallSort = {col:null, dir:0};               // 整体排序: col=指标列, dir=1降序/-1升序/0无
 let overallDebounce = null;
 
@@ -655,17 +656,17 @@ function renderLevelTable(rows, bodyEl, pagerId, pageKey, hintEl, hintText, tool
   const slice = rows.slice((st.page-1)*st.size, st.page*st.size);
   const trs = slice.map(r=>{
     if(r.type==='cat'){
-      return `<tr class="lv-cat"><td class="lv-dim">${esc(ownerText(r.owners))}</td><td class="lv-name"><span class="lv-dot">▣</span>${esc(r.name)}</td><td class="lv-dim">—</td><td class="lv-dim">—</td>${metricCells(r.agg)}</tr>`;
+      return `<tr class="lv-cat"><td class="lv-dim">${esc(ownerText(r.owners))}</td><td class="lv-name"><span class="lv-dot">▣</span>${esc(r.name)}</td><td class="lv-dim">—</td><td class="lv-dim">—</td><td class="lv-dim">—</td>${metricCells(r.agg)}</tr>`;
     }else if(r.type==='short'){
-      return `<tr class="lv-short"><td class="lv-dim">${esc(ownerText(r.owners))}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-name">▢ ${esc(r.name)}</td><td class="lv-dim">—</td>${metricCells(r.agg)}</tr>`;
+      return `<tr class="lv-short"><td class="lv-dim">${esc(ownerText(r.owners))}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-name">▢ ${esc(r.name)}</td><td class="lv-dim">—</td><td class="lv-dim">—</td>${metricCells(r.agg)}</tr>`;
     }
     const it = r.it;
-    return `<tr><td class="lv-dim">${esc(it.owner)}</td><td class="lv-dim">${esc(it.cat)}</td><td class="lv-dim">${esc(it.short)||'—'}</td><td class="lv-name">${esc(it.kw)||'—'}</td>${metricCells(it)}</tr>`;
+    return `<tr><td class="lv-dim">${esc(it.owner)}</td><td class="lv-dim">${esc(it.cat)}</td><td class="lv-dim">${esc(it.short)||'—'}</td><td class="lv-dim">${esc(it.plan)||'—'}</td><td class="lv-name">${esc(it.kw)||'—'}</td>${metricCells(it)}</tr>`;
   }).join('');
   // 表头: 有工具行(整体数据)则工具行即表头; 无工具行(筛选数据)保留原表头文字行
   const headHtml = toolsHtml
     ? `<tr class="tbl-tools">${toolsHtml}</tr>`
-    : `<tr><th>负责人</th><th>品类</th><th>商品简称</th><th>关键词</th><th>消耗</th><th>总ROI</th><th>直接ROI</th><th>CPC</th><th>CVR</th><th>加购成本</th></tr>`;
+    : `<tr><th>负责人</th><th>品类</th><th>商品简称</th><th>计划名字</th><th>关键词</th><th>消耗</th><th>总ROI</th><th>直接ROI</th><th>CPC</th><th>CVR</th><th>加购成本</th></tr>`;
   bodyEl.innerHTML = `<div class="tbl-wrap"><table class="tbl">
     <thead>${headHtml}</thead>
     <tbody>${trs}</tbody></table></div>`;
@@ -681,7 +682,7 @@ function overallToolsHtml(){
     const arrow = so.col===col ? (so.dir===1?'▼':'▲') : '↕';
     return `<button class="tbl-sort${active}" onclick="toggleOverallSort('${col}')">${label}<span class="arrow">${arrow}</span></button>`;
   };
-  return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','消耗')}</td><td>${sortBtn('roi','总ROI')}</td><td>${sortBtn('droi','直接ROI')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cvr','CVR')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
+  return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','消耗')}</td><td>${sortBtn('roi','总ROI')}</td><td>${sortBtn('droi','直接ROI')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cvr','CVR')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
 }
 function scheduleOverallRefresh(){
   clearTimeout(overallDebounce);
@@ -796,7 +797,7 @@ function mapDataRowsArr(rows){
   const ci = {
     sku: idxOf(header,'sku'), kw: idxOf(header,'kw'), spend: idxOf(header,'spend'), rev: idxOf(header,'rev'),
     drev: idxOf(header,'drev'), clicks: idxOf(header,'clicks'), orders: idxOf(header,'orders'), cart: idxOf(header,'cart'),
-    date: idxOf(header,'date')
+    date: idxOf(header,'date'), plan: idxOf(header,'plan')
   };
   const items = []; let skips=0;
   for(let i=1;i<rows.length;i++){
@@ -807,6 +808,7 @@ function mapDataRowsArr(rows){
     items.push({
       sku: String(sku).trim(),
       kw: ci.kw>=0 && r[ci.kw]!=null ? String(r[ci.kw]).trim() : '',
+      plan: ci.plan>=0 && r[ci.plan]!=null ? String(r[ci.plan]).trim() : '',
       spend: num(ci.spend>=0?r[ci.spend]:null), rev: num(ci.rev>=0?r[ci.rev]:null), drev: num(ci.drev>=0?r[ci.drev]:null),
       clicks: num(ci.clicks>=0?r[ci.clicks]:null), orders: num(ci.orders>=0?r[ci.orders]:null), cart: num(ci.cart>=0?r[ci.cart]:null),
       date: ci.date>=0 ? normDate(r[ci.date]) : ''
@@ -1138,14 +1140,15 @@ function renderOverall(){
     renderPager('overall-pager', 'overall', 0);
     return;
   }
-  // 表头搜索过滤(负责人/品类/商品简称/关键词)
+  // 表头搜索过滤(负责人/品类/商品简称/计划名字/关键词)
   let viewItems = items;
   const so = overallSearch;
-  if(so.owner || so.cat || so.short || so.kw){
+  if(so.owner || so.cat || so.short || so.plan || so.kw){
     viewItems = items.filter(it =>
       (!so.owner || (it.owner||'').indexOf(so.owner)>=0) &&
       (!so.cat || (it.cat||'').indexOf(so.cat)>=0) &&
       (!so.short || (it.short||'').indexOf(so.short)>=0) &&
+      (!so.plan || (it.plan||'').indexOf(so.plan)>=0) &&
       (!so.kw || (it.kw||'').indexOf(so.kw)>=0)
     );
   }
@@ -1187,7 +1190,7 @@ function renderOverall(){
   const catSet = new Set(), shortSet = new Set();
   for(const it of viewItems){ catSet.add(it.cat); shortSet.add(it.cat+'|'+it.short); }
   const dateTxt = (dateFrom || dateTo) ? ` · ${dateFrom||'最早'}~${dateTo||'最晚'}` : '';
-  const searchTxt = (so.owner||so.cat||so.short||so.kw) ? ` · 已按搜索条件过滤` : '';
+  const searchTxt = (so.owner||so.cat||so.short||so.plan||so.kw) ? ` · 已按搜索条件过滤` : '';
   const SORT_LABEL = {kw:'关键词', spend:'消耗', roi:'总ROI', droi:'直接ROI', cpc:'CPC', cvr:'CVR', cartcost:'加购成本'};
   const sortTxt = overallSort.col ? ` · 已按「${SORT_LABEL[overallSort.col]||overallSort.col}」${overallSort.dir===1?'降序':'升序'}${sortActive?'(平铺明细)':''}` : '';
   renderLevelTable(rows, body, 'overall-pager', 'overall', hintEl,
@@ -1409,11 +1412,11 @@ function exportReport(mode){
   }else{
     rows = dataset.items;
   }
-  const header = ['负责人','品类','商品ID','商品简称','关键词','消耗','总成交金额','直接成交金额','点击量','订单量','总购物车数','总ROI','直接ROI','CPC','CVR(%)','加购成本'];
+  const header = ['负责人','品类','商品ID','商品简称','计划名字','关键词','消耗','总成交金额','直接成交金额','点击量','订单量','总购物车数','总ROI','直接ROI','CPC','CVR(%)','加购成本'];
   const lines = [header.join(',')];
   for(const it of rows){
     lines.push([
-      csvCell(it.owner), csvCell(it.cat), csvCell(it.sku), csvCell(it.short), csvCell(it.kw),
+      csvCell(it.owner), csvCell(it.cat), csvCell(it.sku), csvCell(it.short), csvCell(it.plan), csvCell(it.kw),
       it.spend, it.rev, it.drev, it.clicks, it.orders, it.cart,
       calcRoi(it.rev,it.spend).toFixed(2), calcRoi(it.drev,it.spend).toFixed(2),
       calcCpc(it.spend,it.clicks).toFixed(2), calcCvr(it.orders,it.clicks).toFixed(2), calcCartCost(it.spend,it.cart).toFixed(2)
