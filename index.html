@@ -1163,7 +1163,7 @@ function renderOverall(){
       else if(col==='cpc'){ vx = calcCpc(x.spend,x.clicks); vy = calcCpc(y.spend,y.clicks); }
       else if(col==='cvr'){ vx = calcCvr(x.orders,x.clicks); vy = calcCvr(y.orders,y.clicks); }
       else if(col==='cartcost'){ vx = calcCartCost(x.spend,x.cart); vy = calcCartCost(y.spend,y.cart); }
-      return (vx - vy) * dir;
+      return (vy - vx) * dir;   // dir=1: 降序(大在前) ▼ / dir=-1: 升序(小在前) ▲
     });
     rows = sorted.map(it => ({type:'kw', it}));
   }else{
