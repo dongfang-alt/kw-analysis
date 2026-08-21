@@ -232,6 +232,12 @@
       <span class="board-bar-title">🚨 异常数据</span>
       <button class="btn btn-ghost btn-sm" onclick="exportReport('anomaly')">📥 报告下载</button>
     </div>
+    <div class="card">
+      <div class="filter-bar">
+        <button class="btn btn-ghost btn-sm" id="a-mode-slide" onclick="setAnomalyMode('slide')">📉 周期下滑 · 7天为一周期持续下滑</button>
+        <button class="btn btn-ghost btn-sm" id="a-mode-cat" onclick="setAnomalyMode('cat')">📉 低于品类均值 · 关键词ROI &lt; 品类汇总ROI</button>
+      </div>
+    </div>
     <div id="anomaly-empty" class="empty hidden">请先导入数据</div>
     <div class="card hidden" id="anomaly-result-card">
       <div class="card-title">🔎 分析结果 <span class="muted" id="anomaly-hint"></span></div>
@@ -1414,12 +1420,22 @@ function toggleAnomalySort(col){
   pageState.anomaly.page = 1;
   renderAnomaly();
 }
+function setAnomalyMode(mode){
+  anomalyMode = mode;
+  const b1 = document.getElementById('a-mode-slide'), b2 = document.getElementById('a-mode-cat');
+  if(b1 && b2){ b1.classList.toggle('active', anomalyMode==='slide'); b2.classList.toggle('active', anomalyMode==='cat'); }
+  pageState.anomaly.page = 1;
+  renderAnomaly();
+}
 function renderAnomaly(){
   const card = document.getElementById('anomaly-result-card');
   const emptyBox = document.getElementById('anomaly-empty');
   const statsBox = document.getElementById('anomaly-stats');
   const body = document.getElementById('anomaly-body');
   const hintEl = document.getElementById('anomaly-hint');
+  // 同步筛选项按钮状态(即使无数据也正确显示)
+  const b1 = document.getElementById('a-mode-slide'), b2 = document.getElementById('a-mode-cat');
+  if(b1 && b2){ b1.classList.toggle('active', anomalyMode==='slide'); b2.classList.toggle('active', anomalyMode==='cat'); }
   if(!dataset || !dataset.items.length){
     card.classList.add('hidden');
     if(emptyBox) emptyBox.classList.remove('hidden');
