@@ -80,7 +80,7 @@
   table.tbl tr.lv-cat td{background:#EEF2FF;font-weight:800;color:#4F46E5;}
   table.tbl tr.lv-short td{background:#F8FAFC;font-weight:700;}
   table.tbl tr.lv-cat:hover td,table.tbl tr.lv-short:hover td{background:#EEF2FF;}
-  td.lv-name{min-width:180px;font-weight:600;}
+  td.lv-name{min-width:180px;max-width:300px;font-weight:600;white-space:normal;word-break:break-all;line-height:1.35;}
   td.lv-dim{min-width:110px;color:#94A3B8;font-weight:400;}
   thead th:nth-child(1),thead th:nth-child(2),thead th:nth-child(3),thead th:nth-child(4),thead th:nth-child(5){min-width:100px;}
   .lv-dot{color:#6366F1;margin-right:4px;}
@@ -1407,13 +1407,14 @@ function buildSlideAnalysis(){
     const lastSpend = lastP.spend, prevSpend = prevP.spend;
     const lastRoi = calcRoi(lastP.rev, lastP.spend), prevRoi = calcRoi(prevP.rev, prevP.spend);
     const chg = prevRoi ? (lastRoi - prevRoi)/prevRoi*100 : (lastRoi ? -100 : 0);
-    const ownerMap = new Map(), catMap = new Map(), planMap = new Map();
+    const ownerMap = new Map(), catMap = new Map(), planMap = new Map(), shortMap = new Map();
     for(const it of list){
       ownerMap.set(it.owner,(ownerMap.get(it.owner)||0)+1);
       catMap.set(it.cat,(catMap.get(it.cat)||0)+1);
       planMap.set(it.plan,(planMap.get(it.plan)||0)+1);
+      shortMap.set(it.short,(shortMap.get(it.short)||0)+1);
     }
-    results.push({kw, owner:topValue(ownerMap,true)||'未分配', cat:topValue(catMap,true)||'未分配', plan:topValue(planMap,false)||'—', periods:keys.length,
+    results.push({kw, owner:topValue(ownerMap,true)||'未分配', cat:topValue(catMap,true)||'未分配', plan:topValue(planMap,false)||'—', short:topValue(shortMap,true)||'—', periods:keys.length,
       lastSpend, prevSpend, lastRoi, prevRoi, chg,
       lastRev:lastP.rev, prevRev:prevP.rev, agg});
   }
@@ -1427,12 +1428,13 @@ function buildCatRoiAnalysis(){
     if(!it.kw) continue;
     if(!catAgg.has(it.cat)) catAgg.set(it.cat, aggRow());
     const ca = catAgg.get(it.cat);
-    if(!kwAgg.has(it.kw)) kwAgg.set(it.kw, {agg:aggRow(), ownerMap:new Map(), catMap:new Map(), planMap:new Map()});
+    if(!kwAgg.has(it.kw)) kwAgg.set(it.kw, {agg:aggRow(), ownerMap:new Map(), catMap:new Map(), planMap:new Map(), shortMap:new Map()});
     const info = kwAgg.get(it.kw);
     const ka = info.agg;
     info.ownerMap.set(it.owner,(info.ownerMap.get(it.owner)||0)+1);
     info.catMap.set(it.cat,(info.catMap.get(it.cat)||0)+1);
     info.planMap.set(it.plan,(info.planMap.get(it.plan)||0)+1);
+    info.shortMap.set(it.short,(info.shortMap.get(it.short)||0)+1);
     for(const k of AGG_KEYS){ ca[k]+=it[k]; ka[k]+=it[k]; }
   }
   const results = [];
@@ -1440,11 +1442,12 @@ function buildCatRoiAnalysis(){
     const owner = topValue(info.ownerMap,true)||'未分配';
     const cat = topValue(info.catMap,true)||'未分配';
     const plan = topValue(info.planMap,false)||'—';
+    const short = topValue(info.shortMap,true)||'—';
     const ca = catAgg.get(cat);
     if(!ca || !ca.spend || !info.agg.spend) continue;   // 无消耗无法算ROI
     const catRoi = ca.rev / ca.spend;
     const kwRoi = info.agg.rev / info.agg.spend;
-    if(kwRoi < catRoi) results.push({kw, owner, cat, plan, catRoi, kwRoi, agg:info.agg});
+    if(kwRoi < catRoi) results.push({kw, owner, cat, plan, short, catRoi, kwRoi, agg:info.agg});
   }
   results.sort((a,b)=> (a.kwRoi - a.catRoi) - (b.kwRoi - b.catRoi));   // 差距最大(最差)在前
   return results;
@@ -1460,13 +1463,14 @@ function buildNoRev7Analysis(){
   const kwMap = new Map();
   for(const it of items){
     if(!it.kw) continue;
-    if(!kwMap.has(it.kw)) kwMap.set(it.kw, {spend:0, rev:0, clicks:0, orders:0, cart:0, wSpend:0, wRev:0, wClicks:0, wCart:0, ownerMap:new Map(), catMap:new Map(), planMap:new Map()});
+    if(!kwMap.has(it.kw)) kwMap.set(it.kw, {spend:0, rev:0, clicks:0, orders:0, cart:0, wSpend:0, wRev:0, wClicks:0, wCart:0, ownerMap:new Map(), catMap:new Map(), planMap:new Map(), shortMap:new Map()});
     const k = kwMap.get(it.kw);
     k.spend+=it.spend; k.rev+=it.rev; k.clicks+=it.clicks; k.orders+=it.orders; k.cart+=it.cart;
     if(it.date && it.date>=from && it.date<=maxDate){ k.wSpend+=it.spend; k.wRev+=it.rev; k.wClicks+=it.clicks; k.wCart+=it.cart; }
     k.ownerMap.set(it.owner,(k.ownerMap.get(it.owner)||0)+1);
     k.catMap.set(it.cat,(k.catMap.get(it.cat)||0)+1);
     k.planMap.set(it.plan,(k.planMap.get(it.plan)||0)+1);
+    k.shortMap.set(it.short,(k.shortMap.get(it.short)||0)+1);
   }
   const results = [];
   for(const [kw, k] of kwMap){
@@ -1475,6 +1479,7 @@ function buildNoRev7Analysis(){
       owner: topValue(k.ownerMap,true)||'未分配',
       cat: topValue(k.catMap,true)||'未分配',
       plan: topValue(k.planMap,false)||'—',
+      short: topValue(k.shortMap,true)||'—',
       spend:k.wSpend, clicks:k.wClicks, cart:k.wCart, totalRev:k.wRev,
       from, to:maxDate});
   }
@@ -1490,12 +1495,12 @@ function anomalyToolsHtml(mode){
     return `<button class="tbl-sort${active}" onclick="toggleAnomalySort('${col}')">${label}<span class="arrow">${arrow}</span></button>`;
   };
   if(mode==='slide'){
-    return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('periods','周期数')}</td><td>${sortBtn('prevSpend','上周期消耗')}</td><td>${sortBtn('prevRoi','上周期ROI')}</td><td>${sortBtn('lastSpend','最近周期消耗')}</td><td>${sortBtn('lastRoi','最近周期ROI')}</td><td>${sortBtn('chg','环比')}</td>`;
+    return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('periods','周期数')}</td><td>${sortBtn('prevSpend','上周期消耗')}</td><td>${sortBtn('prevRoi','上周期ROI')}</td><td>${sortBtn('lastSpend','最近周期消耗')}</td><td>${sortBtn('lastRoi','最近周期ROI')}</td><td>${sortBtn('chg','环比')}</td>`;
   }
   if(mode==='noRev7'){
-    return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','近7天消耗')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cart','购物车数')}</td><td>${sortBtn('cartcost','加购成本')}</td><td>${sortBtn('totalRev','总成交金额')}</td>`;
+    return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','近7天消耗')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cart','购物车数')}</td><td>${sortBtn('cartcost','加购成本')}</td><td>${sortBtn('totalRev','总成交金额')}</td>`;
   }
-  return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('kwRoi','关键词ROI')}</td><td>${sortBtn('catRoi','品类汇总ROI')}</td><td>${sortBtn('diff','差值')}</td><td>${sortBtn('spend','总消耗')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
+  return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('short','搜商品')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('kwRoi','关键词ROI')}</td><td>${sortBtn('catRoi','品类汇总ROI')}</td><td>${sortBtn('diff','差值')}</td><td>${sortBtn('spend','总消耗')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
 }
 function anomalySearchInput(f, v){ anomalySearch[f] = v; scheduleAnomalyRefresh(); }
 function scheduleAnomalyRefresh(){
@@ -1534,17 +1539,18 @@ function renderAnomaly(){
   card.classList.remove('hidden');
   if(emptyBox) emptyBox.classList.add('hidden');
   let rows = anomalyMode==='slide' ? buildSlideAnalysis() : anomalyMode==='cat' ? buildCatRoiAnalysis() : buildNoRev7Analysis();
-  // 表头搜索过滤(关键词/负责人/品类/计划名字) —— 与整体数据样式一致
+  // 表头搜索过滤(关键词/负责人/品类/商品/计划名字) —— 与整体数据样式一致
   const as = anomalySearch;
-  if(as.owner || as.cat || as.plan || as.kw){
+  if(as.owner || as.cat || as.short || as.plan || as.kw){
     rows = rows.filter(r =>
       (!as.owner || (r.owner||'').indexOf(as.owner)>=0) &&
       (!as.cat || (r.cat||'').indexOf(as.cat)>=0) &&
+      (!as.short || (r.short||'').indexOf(as.short)>=0) &&
       (!as.plan || (r.plan||'').indexOf(as.plan)>=0) &&
       (!as.kw || (r.kw||'').indexOf(as.kw)>=0)
     );
   }
-  const searchTxt = (as.owner||as.cat||as.plan||as.kw) ? ' · 已按表头搜索过滤' : '';
+  const searchTxt = (as.owner||as.cat||as.short||as.plan||as.kw) ? ' · 已按表头搜索过滤' : '';
   if(!rows.length){
     hintEl.textContent = (anomalyMode==='slide' ? '(无持续下滑的关键词)' : anomalyMode==='cat' ? '(无低于品类均值的关键词)' : '(无近7天无成交的关键词)') + searchTxt;
     statsBox.innerHTML = '';
