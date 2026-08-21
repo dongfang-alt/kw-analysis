@@ -392,7 +392,7 @@ function fmt(n, d=2){
   if(Math.abs(n)>=100000) return n.toLocaleString('zh-CN',{maximumFractionDigits:0});
   return Number(n).toLocaleString('zh-CN',{minimumFractionDigits:d, maximumFractionDigits:d});
 }
-function fmtInt(n){ return n==null?0:Number(n).toLocaleString('zh-CN'); }
+function fmtInt(n){ return n==null?0:Number(n).toLocaleString('zh-CN',{maximumFractionDigits:0}); }
 function roiClass(r){ return r>=3?'roi-good':(r>=1?'roi-mid':'roi-bad'); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -644,7 +644,7 @@ function buildLevelRows(items){
 }
 // 组/行指标单元格(先汇总分子分母再相除)
 function metricCells(agg){
-  return `<td class="num">${fmt(agg.spend)}</td>
+  return `<td class="num">${fmtInt(agg.spend)}</td>
     <td class="num ${roiClass(calcRoi(agg.rev,agg.spend))}">${fmt(calcRoi(agg.rev,agg.spend))}</td>
     <td class="num ${roiClass(calcRoi(agg.drev,agg.spend))}">${fmt(calcRoi(agg.drev,agg.spend))}</td>
     <td class="num">${fmt(calcCpc(agg.spend,agg.clicks))}</td>
@@ -1176,8 +1176,8 @@ function renderOverall(){
   const a = {spend, rev, drev, clicks, orders, cart};
   statsBox.innerHTML = [
     ['数据行数', fmtInt(viewItems.length), 'primary'],
-    ['总消耗', fmt(a.spend), ''],
-    ['总成交金额', fmt(a.rev), ''],
+    ['总消耗', fmtInt(a.spend), ''],
+    ['总成交金额', fmtInt(a.rev), ''],
     ['总ROI', fmt(calcRoi(a.rev,a.spend)), roiClass(calcRoi(a.rev,a.spend))],
     ['直接ROI', fmt(calcRoi(a.drev,a.spend)), roiClass(calcRoi(a.drev,a.spend))],
     ['CPC', fmt(calcCpc(a.spend,a.clicks)), ''],
@@ -1309,7 +1309,7 @@ function renderFilterResult(){
   const agg = aggRow();
   for(const it of rows){ for(const k of AGG_KEYS) agg[k]+=it[k]; }
   document.getElementById('filter-stats').innerHTML = [
-    ['消耗', fmt(agg.spend), ''],
+    ['消耗', fmtInt(agg.spend), ''],
     ['总ROI', fmt(calcRoi(agg.rev,agg.spend)), roiClass(calcRoi(agg.rev,agg.spend))],
     ['直接ROI', fmt(calcRoi(agg.drev,agg.spend)), roiClass(calcRoi(agg.drev,agg.spend))],
     ['CPC', fmt(calcCpc(agg.spend,agg.clicks)), ''],
@@ -1454,8 +1454,8 @@ function renderAnomaly(){
     statsBox.innerHTML = [
       ['下滑关键词', fmtInt(rows.length), 'primary'],
       ['涉及品类', fmtInt(catSet.size), ''],
-      ['总消耗', fmt(spend), ''],
-      ['总成交', fmt(rev), ''],
+      ['总消耗', fmtInt(spend), ''],
+      ['总成交', fmtInt(rev), ''],
       ['总ROI', fmt(calcRoi(rev,spend)), roiClass(calcRoi(rev,spend))]
     ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
   }else{
@@ -1500,12 +1500,12 @@ function renderAnomaly(){
   if(anomalyMode==='slide'){
     trs = slice.map(r=>{
       const chg = r.prevRev ? (r.lastRev - r.prevRev)/r.prevRev*100 : (r.lastRev ? -100 : 0);
-      return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num">${r.periods}</td><td class="num">${fmt(r.lastRev)}</td><td class="num">${fmt(r.prevRev)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td><td class="num">${fmt(r.agg.rev)}</td><td class="num">${fmt(r.agg.spend)}</td><td class="num ${roiClass(calcRoi(r.agg.rev,r.agg.spend))}">${fmt(calcRoi(r.agg.rev,r.agg.spend))}</td></tr>`;
+      return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num">${r.periods}</td><td class="num">${fmt(r.lastRev)}</td><td class="num">${fmt(r.prevRev)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td><td class="num">${fmtInt(r.agg.rev)}</td><td class="num">${fmtInt(r.agg.spend)}</td><td class="num ${roiClass(calcRoi(r.agg.rev,r.agg.spend))}">${fmt(calcRoi(r.agg.rev,r.agg.spend))}</td></tr>`;
     }).join('');
   }else{
     trs = slice.map(r=>{
       const diff = r.kwRoi - r.catRoi;
-      return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num roi-bad">${fmt(r.kwRoi)}</td><td class="num">${fmt(r.catRoi)}</td><td class="num roi-bad">${fmt(diff)}</td><td class="num">${fmt(r.agg.spend)}</td><td class="num">${fmt(r.agg.rev)}</td><td class="num">${fmtInt(r.agg.clicks)}</td><td class="num">${fmtInt(r.agg.orders)}</td></tr>`;
+      return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num roi-bad">${fmt(r.kwRoi)}</td><td class="num">${fmt(r.catRoi)}</td><td class="num roi-bad">${fmt(diff)}</td><td class="num">${fmtInt(r.agg.spend)}</td><td class="num">${fmtInt(r.agg.rev)}</td><td class="num">${fmtInt(r.agg.clicks)}</td><td class="num">${fmtInt(r.agg.orders)}</td></tr>`;
     }).join('');
   }
   hintEl.textContent = (anomalyMode==='slide'
