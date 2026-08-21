@@ -1142,6 +1142,31 @@ function renderAll(){
   renderFilterResult();
   renderAnomaly();
 }
+/* ---------- 整体数据: 聚合(不分天) ---------- */
+// 按 品类|商品|计划|关键词 聚合明细, 多天数据合并为一行; 负责人取众数(跳过未分配)
+function aggregateItems(items){
+  const map = new Map();
+  for(const it of items){
+    const key = it.cat + '\u0001' + it.short + '\u0001' + it.plan + '\u0001' + it.kw;
+    let g = map.get(key);
+    if(!g){
+      g = {cat:it.cat, short:it.short, plan:it.plan, kw:it.kw, ownerMap:new Map(), agg:aggRow()};
+      map.set(key, g);
+    }
+    g.ownerMap.set(it.owner, (g.ownerMap.get(it.owner)||0)+1);
+    for(const k of AGG_KEYS) g.agg[k] += it[k];
+  }
+  const out = [];
+  for(const g of map.values()){
+    out.push({
+      owner: topValue(g.ownerMap, true) || '未分配',
+      cat:g.cat, short:g.short, plan:g.plan, kw:g.kw,
+      spend:g.agg.spend, rev:g.agg.rev, drev:g.agg.drev,
+      clicks:g.agg.clicks, orders:g.agg.orders, cart:g.agg.cart
+    });
+  }
+  return out;
+}
 function renderOverall(){
   const statsBox = document.getElementById('overall-stats');
   const body = document.getElementById('overall-body');
@@ -1177,6 +1202,8 @@ function renderOverall(){
       (!so.kw || (it.kw||'').indexOf(so.kw)>=0)
     );
   }
+  // 整体数据: 聚合展示(不分天), 同一 品类+商品+计划+关键词 的多天明细合并为一行
+  viewItems = aggregateItems(viewItems);
   let spend=0, rev=0, drev=0, clicks=0, orders=0, cart=0, matched=0;
   for(const it of viewItems){
     spend+=it.spend; rev+=it.rev; drev+=it.drev; clicks+=it.clicks; orders+=it.orders; cart+=it.cart;
