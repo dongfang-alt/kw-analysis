@@ -1619,16 +1619,16 @@ function renderAnomaly(){
   if(anomalyMode==='slide'){
     trs = slice.map(r=>{
       const chg = r.chg;
-      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num">${r.periods}</td><td class="num">${fmtInt(r.prevSpend)}</td><td class="num ${roiClass(r.prevRoi)}">${fmt(r.prevRoi)}</td><td class="num">${fmtInt(r.lastSpend)}</td><td class="num ${roiClass(r.lastRoi)}">${fmt(r.lastRoi)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td></tr>`;
+      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.short)||'—'}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num">${r.periods}</td><td class="num">${fmtInt(r.prevSpend)}</td><td class="num ${roiClass(r.prevRoi)}">${fmt(r.prevRoi)}</td><td class="num">${fmtInt(r.lastSpend)}</td><td class="num ${roiClass(r.lastRoi)}">${fmt(r.lastRoi)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td></tr>`;
     }).join('');
   }else if(anomalyMode==='noRev7'){
     trs = slice.map(r=>{
-      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num roi-bad">${fmtInt(r.spend)}</td><td class="num">${fmtInt(r.clicks)}</td><td class="num">${fmt(calcCpc(r.spend,r.clicks))}</td><td class="num">${fmtInt(r.cart)}</td><td class="num">${fmt(calcCartCost(r.spend,r.cart))}</td><td class="num">${fmtInt(r.totalRev)}</td></tr>`;
+      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.short)||'—'}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num roi-bad">${fmtInt(r.spend)}</td><td class="num">${fmtInt(r.clicks)}</td><td class="num">${fmt(calcCpc(r.spend,r.clicks))}</td><td class="num">${fmtInt(r.cart)}</td><td class="num">${fmt(calcCartCost(r.spend,r.cart))}</td><td class="num">${fmtInt(r.totalRev)}</td></tr>`;
     }).join('');
   }else{
     trs = slice.map(r=>{
       const diff = r.kwRoi - r.catRoi;
-      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num roi-bad">${fmt(r.kwRoi)}</td><td class="num">${fmt(r.catRoi)}</td><td class="num roi-bad">${fmt(diff)}</td><td class="num">${fmtInt(r.agg.spend)}</td><td class="num">${fmtInt(r.agg.clicks)}</td><td class="num">${fmt(calcCpc(r.agg.spend,r.agg.clicks))}</td><td class="num">${fmt(calcCartCost(r.agg.spend,r.agg.cart))}</td></tr>`;
+      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.short)||'—'}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num roi-bad">${fmt(r.kwRoi)}</td><td class="num">${fmt(r.catRoi)}</td><td class="num roi-bad">${fmt(diff)}</td><td class="num">${fmtInt(r.agg.spend)}</td><td class="num">${fmtInt(r.agg.clicks)}</td><td class="num">${fmt(calcCpc(r.agg.spend,r.agg.clicks))}</td><td class="num">${fmt(calcCartCost(r.agg.spend,r.agg.cart))}</td></tr>`;
     }).join('');
   }
   hintEl.textContent = (anomalyMode==='slide'
@@ -1710,28 +1710,28 @@ function exportReport(mode){
   if(mode === 'anomaly'){
     if(anomalyMode==='slide'){
       const ar = buildSlideAnalysis();
-      const header = ['负责人','品类','计划名字','关键词','周期数','上周期消耗','上周期ROI','最近周期消耗','最近周期ROI','环比(%)'];
+      const header = ['负责人','品类','商品简称','计划名字','关键词','周期数','上周期消耗','上周期ROI','最近周期消耗','最近周期ROI','环比(%)'];
       const lines = [header.join(',')];
       for(const r of ar){
-        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), csvCell(r.kw), r.periods, r.prevSpend.toFixed(2), r.prevRoi.toFixed(2), r.lastSpend.toFixed(2), r.lastRoi.toFixed(2), r.chg.toFixed(1)].join(','));
+        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.short), csvCell(r.plan), csvCell(r.kw), r.periods, r.prevSpend.toFixed(2), r.prevRoi.toFixed(2), r.lastSpend.toFixed(2), r.lastRoi.toFixed(2), r.chg.toFixed(1)].join(','));
       }
       download('关键词分析_周期下滑_报告.csv', '\ufeff' + lines.join('\n'));
       toast('📥 报告已下载(' + ar.length + ' 行)');
     }else if(anomalyMode==='noRev7'){
       const ar = buildNoRev7Analysis();
-      const header = ['负责人','品类','计划名字','关键词','近7天消耗','点击量','CPC','购物车数','加购成本','总成交金额','日期区间'];
+      const header = ['负责人','品类','商品简称','计划名字','关键词','近7天消耗','点击量','CPC','购物车数','加购成本','总成交金额','日期区间'];
       const lines = [header.join(',')];
       for(const r of ar){
-        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), csvCell(r.kw), r.spend.toFixed(2), r.clicks, calcCpc(r.spend,r.clicks).toFixed(2), r.cart, calcCartCost(r.spend,r.cart).toFixed(2), r.totalRev.toFixed(2), r.from+'~'+r.to].join(','));
+        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.short), csvCell(r.plan), csvCell(r.kw), r.spend.toFixed(2), r.clicks, calcCpc(r.spend,r.clicks).toFixed(2), r.cart, calcCartCost(r.spend,r.cart).toFixed(2), r.totalRev.toFixed(2), r.from+'~'+r.to].join(','));
       }
       download('关键词分析_7天无成交_报告.csv', '\ufeff' + lines.join('\n'));
       toast('📥 报告已下载(' + ar.length + ' 行)');
     }else{
       const ar = buildCatRoiAnalysis();
-      const header = ['负责人','品类','计划名字','关键词','关键词ROI','品类汇总ROI','差值','总消耗','点击量','CPC','加购成本'];
+      const header = ['负责人','品类','商品简称','计划名字','关键词','关键词ROI','品类汇总ROI','差值','总消耗','点击量','CPC','加购成本'];
       const lines = [header.join(',')];
       for(const r of ar){
-        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), csvCell(r.kw), r.kwRoi.toFixed(2), r.catRoi.toFixed(2), (r.kwRoi-r.catRoi).toFixed(2), r.agg.spend.toFixed(2), r.agg.clicks, calcCpc(r.agg.spend,r.agg.clicks).toFixed(2), calcCartCost(r.agg.spend,r.agg.cart).toFixed(2)].join(','));
+        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.short), csvCell(r.plan), csvCell(r.kw), r.kwRoi.toFixed(2), r.catRoi.toFixed(2), (r.kwRoi-r.catRoi).toFixed(2), r.agg.spend.toFixed(2), r.agg.clicks, calcCpc(r.agg.spend,r.agg.clicks).toFixed(2), calcCartCost(r.agg.spend,r.agg.cart).toFixed(2)].join(','));
       }
       download('关键词分析_低于品类均值_报告.csv', '\ufeff' + lines.join('\n'));
       toast('📥 报告已下载(' + ar.length + ' 行)');
