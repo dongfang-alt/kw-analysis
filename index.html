@@ -236,6 +236,7 @@
       <div class="filter-bar">
         <button class="btn btn-ghost btn-sm" id="a-mode-slide" onclick="setAnomalyMode('slide')">📉 周期下滑 · 7天为一周期持续下滑</button>
         <button class="btn btn-ghost btn-sm" id="a-mode-cat" onclick="setAnomalyMode('cat')">📉 低于品类均值 · 关键词ROI &lt; 品类汇总ROI</button>
+        <button class="btn btn-ghost btn-sm" id="a-mode-norev" onclick="setAnomalyMode('noRev7')">📉 7天无成交 · 近7天消耗无成交</button>
       </div>
     </div>
     <div id="anomaly-empty" class="empty hidden">请先导入数据</div>
@@ -1419,6 +1420,37 @@ function buildCatRoiAnalysis(){
   results.sort((a,b)=> (a.kwRoi - a.catRoi) - (b.kwRoi - b.catRoi));   // 差距最大(最差)在前
   return results;
 }
+// 7天无成交: 取数据源最新日期往前7天, 筛出有消耗但无成交的关键词
+function buildNoRev7Analysis(){
+  const items = dateFilteredItems();
+  let maxDate = '';
+  for(const it of items){ if(it.date && it.date>maxDate) maxDate = it.date; }
+  if(!maxDate) return [];
+  const mp = maxDate.split('-').map(Number);
+  const from = new Date(Date.UTC(mp[0],mp[1]-1,mp[2]-6)).toISOString().slice(0,10);
+  const kwMap = new Map();
+  for(const it of items){
+    if(!it.kw || !it.date) continue;
+    if(it.date < from || it.date > maxDate) continue;
+    if(!kwMap.has(it.kw)) kwMap.set(it.kw, {spend:0, rev:0, clicks:0, orders:0, cart:0, ownerMap:new Map(), catMap:new Map(), planMap:new Map()});
+    const k = kwMap.get(it.kw);
+    k.spend+=it.spend; k.rev+=it.rev; k.clicks+=it.clicks; k.orders+=it.orders; k.cart+=it.cart;
+    k.ownerMap.set(it.owner,(k.ownerMap.get(it.owner)||0)+1);
+    k.catMap.set(it.cat,(k.catMap.get(it.cat)||0)+1);
+    k.planMap.set(it.plan,(k.planMap.get(it.plan)||0)+1);
+  }
+  const results = [];
+  for(const [kw, k] of kwMap){
+    if(!(k.spend > 0) || k.rev > 0) continue;   // 近7天有消耗且无成交
+    results.push({kw,
+      owner: topValue(k.ownerMap,true)||'未分配',
+      cat: topValue(k.catMap,true)||'未分配',
+      plan: topValue(k.planMap,false)||'—',
+      spend:k.spend, clicks:k.clicks, orders:k.orders, cart:k.cart,
+      from, to:maxDate});
+  }
+  return results;
+}
 // 异常数据工具行: 搜索 + 排序 (样式与整体数据一致, 列按当前模式)
 function anomalyToolsHtml(mode){
   const s = anomalySearch, so = anomalySort;
@@ -1430,6 +1462,9 @@ function anomalyToolsHtml(mode){
   };
   if(mode==='slide'){
     return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('periods','周期数')}</td><td>${sortBtn('prevSpend','上周期消耗')}</td><td>${sortBtn('prevRoi','上周期ROI')}</td><td>${sortBtn('lastSpend','最近周期消耗')}</td><td>${sortBtn('lastRoi','最近周期ROI')}</td><td>${sortBtn('chg','环比')}</td>`;
+  }
+  if(mode==='noRev7'){
+    return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','近7天消耗')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('orders','订单量')}</td><td>${sortBtn('cart','购物车数')}</td>`;
   }
   return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('kwRoi','关键词ROI')}</td><td>${sortBtn('catRoi','品类汇总ROI')}</td><td>${sortBtn('diff','差值')}</td><td>${sortBtn('spend','总消耗')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
 }
@@ -1448,8 +1483,8 @@ function toggleAnomalySort(col){
 }
 function setAnomalyMode(mode){
   anomalyMode = mode;
-  const b1 = document.getElementById('a-mode-slide'), b2 = document.getElementById('a-mode-cat');
-  if(b1 && b2){ b1.classList.toggle('active', anomalyMode==='slide'); b2.classList.toggle('active', anomalyMode==='cat'); }
+  const b1 = document.getElementById('a-mode-slide'), b2 = document.getElementById('a-mode-cat'), b3 = document.getElementById('a-mode-norev');
+  if(b1 && b2 && b3){ b1.classList.toggle('active', anomalyMode==='slide'); b2.classList.toggle('active', anomalyMode==='cat'); b3.classList.toggle('active', anomalyMode==='noRev7'); }
   pageState.anomaly.page = 1;
   renderAnomaly();
 }
@@ -1460,8 +1495,8 @@ function renderAnomaly(){
   const body = document.getElementById('anomaly-body');
   const hintEl = document.getElementById('anomaly-hint');
   // 同步筛选项按钮状态(即使无数据也正确显示)
-  const b1 = document.getElementById('a-mode-slide'), b2 = document.getElementById('a-mode-cat');
-  if(b1 && b2){ b1.classList.toggle('active', anomalyMode==='slide'); b2.classList.toggle('active', anomalyMode==='cat'); }
+  const b1 = document.getElementById('a-mode-slide'), b2 = document.getElementById('a-mode-cat'), b3 = document.getElementById('a-mode-norev');
+  if(b1 && b2 && b3){ b1.classList.toggle('active', anomalyMode==='slide'); b2.classList.toggle('active', anomalyMode==='cat'); b3.classList.toggle('active', anomalyMode==='noRev7'); }
   if(!dataset || !dataset.items.length){
     card.classList.add('hidden');
     if(emptyBox) emptyBox.classList.remove('hidden');
@@ -1469,7 +1504,7 @@ function renderAnomaly(){
   }
   card.classList.remove('hidden');
   if(emptyBox) emptyBox.classList.add('hidden');
-  let rows = anomalyMode==='slide' ? buildSlideAnalysis() : buildCatRoiAnalysis();
+  let rows = anomalyMode==='slide' ? buildSlideAnalysis() : anomalyMode==='cat' ? buildCatRoiAnalysis() : buildNoRev7Analysis();
   // 表头搜索过滤(关键词/负责人/品类/计划名字) —— 与整体数据样式一致
   const as = anomalySearch;
   if(as.owner || as.cat || as.plan || as.kw){
@@ -1482,7 +1517,7 @@ function renderAnomaly(){
   }
   const searchTxt = (as.owner||as.cat||as.plan||as.kw) ? ' · 已按表头搜索过滤' : '';
   if(!rows.length){
-    hintEl.textContent = (anomalyMode==='slide' ? '(无持续下滑的关键词)' : '(无低于品类均值的关键词)') + searchTxt;
+    hintEl.textContent = (anomalyMode==='slide' ? '(无持续下滑的关键词)' : anomalyMode==='cat' ? '(无低于品类均值的关键词)' : '(无近7天无成交的关键词)') + searchTxt;
     statsBox.innerHTML = '';
     body.innerHTML = `<div class="placeholder"><div class="icon">📉</div><h3>无异常数据</h3><p>当前条件下没有命中异常关键词</p></div>`;
     renderPager('anomaly-pager', 'anomaly', 0);
@@ -1500,6 +1535,17 @@ function renderAnomaly(){
       ['总成交', fmtInt(rev), ''],
       ['总ROI', fmt(calcRoi(rev,spend)), roiClass(calcRoi(rev,spend))]
     ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+  }else if(anomalyMode==='noRev7'){
+    let spend=0, clicks=0, cart=0;
+    for(const r of rows){ spend+=r.spend; clicks+=r.clicks; cart+=r.cart; }
+    const catSet = new Set(rows.map(r=>r.cat));
+    statsBox.innerHTML = [
+      ['无成交关键词', fmtInt(rows.length), 'primary'],
+      ['涉及品类', fmtInt(catSet.size), ''],
+      ['近7天消耗', fmtInt(spend), ''],
+      ['点击量', fmtInt(clicks), ''],
+      ['购物车数', fmtInt(cart), '']
+    ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
   }else{
     const catSet = new Set(rows.map(r=>r.cat));
     statsBox.innerHTML = [
@@ -1508,8 +1554,9 @@ function renderAnomaly(){
     ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
   }
   // 表头排序 —— 与整体数据样式一致
-  const ANOMALY_SORT_LABEL = {periods:'周期数', prevSpend:'上周期消耗', prevRoi:'上周期ROI', lastSpend:'最近周期消耗', lastRoi:'最近周期ROI', chg:'环比', kwRoi:'关键词ROI', catRoi:'品类汇总ROI', diff:'差值', spend:'总消耗', cpc:'CPC', cartcost:'加购成本', clicks:'点击量', roi:'总ROI'};
+  const ANOMALY_SORT_LABEL = {periods:'周期数', prevSpend:'上周期消耗', prevRoi:'上周期ROI', lastSpend:'最近周期消耗', lastRoi:'最近周期ROI', chg:'环比', kwRoi:'关键词ROI', catRoi:'品类汇总ROI', diff:'差值', spend:'总消耗', cpc:'CPC', cartcost:'加购成本', clicks:'点击量', orders:'订单量', cart:'购物车数', roi:'总ROI'};
   function sortVal(r, col){
+    const A = r.agg || r;   // noRev7 结果无 agg, 直接用自身
     if(col==='periods') return r.periods;
     if(col==='prevSpend') return r.prevSpend;
     if(col==='prevRoi') return r.prevRoi;
@@ -1519,12 +1566,14 @@ function renderAnomaly(){
     if(col==='kwRoi') return r.kwRoi;
     if(col==='catRoi') return r.catRoi;
     if(col==='diff') return r.kwRoi - r.catRoi;
-    if(col==='clicks') return r.agg.clicks;
-    if(col==='cpc') return calcCpc(r.agg.spend, r.agg.clicks);
-    if(col==='cartcost') return calcCartCost(r.agg.spend, r.agg.cart);
-    if(col==='spend') return r.agg.spend;
-    if(col==='rev') return r.agg.rev;
-    if(col==='roi') return calcRoi(r.agg.rev, r.agg.spend);
+    if(col==='clicks') return A.clicks;
+    if(col==='cpc') return calcCpc(A.spend, A.clicks);
+    if(col==='cartcost') return calcCartCost(A.spend, A.cart);
+    if(col==='orders') return A.orders;
+    if(col==='cart') return A.cart;
+    if(col==='spend') return A.spend;
+    if(col==='rev') return A.rev;
+    if(col==='roi') return calcRoi(A.rev, A.spend);
     return 0;
   }
   let sortActive = false;
@@ -1547,6 +1596,10 @@ function renderAnomaly(){
       const chg = r.chg;
       return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num">${r.periods}</td><td class="num">${fmtInt(r.prevSpend)}</td><td class="num ${roiClass(r.prevRoi)}">${fmt(r.prevRoi)}</td><td class="num">${fmtInt(r.lastSpend)}</td><td class="num ${roiClass(r.lastRoi)}">${fmt(r.lastRoi)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td></tr>`;
     }).join('');
+  }else if(anomalyMode==='noRev7'){
+    trs = slice.map(r=>{
+      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num roi-bad">${fmtInt(r.spend)}</td><td class="num">${fmtInt(r.clicks)}</td><td class="num">${fmtInt(r.orders)}</td><td class="num">${fmtInt(r.cart)}</td></tr>`;
+    }).join('');
   }else{
     trs = slice.map(r=>{
       const diff = r.kwRoi - r.catRoi;
@@ -1555,7 +1608,9 @@ function renderAnomaly(){
   }
   hintEl.textContent = (anomalyMode==='slide'
     ? `(命中 ${fmtInt(total)} 个持续下滑关键词 · 7天周期成交逐期递减)`
-    : `(命中 ${fmtInt(total)} 个低于品类均值的关键词 · 按差距升序)`) + searchTxt + sortTxt;
+    : anomalyMode==='cat'
+      ? `(命中 ${fmtInt(total)} 个低于品类均值的关键词 · 按差距升序)`
+      : `(命中 ${fmtInt(total)} 个近7天无成交关键词 · ${rows.length?rows[0].from:'—'} ~ ${rows.length?rows[0].to:'—'})`) + searchTxt + sortTxt;
   body.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr class="tbl-tools">${anomalyToolsHtml(anomalyMode)}</tr></thead><tbody>${trs}</tbody></table></div>`;
   renderPager('anomaly-pager', 'anomaly', total);
 }
@@ -1636,6 +1691,15 @@ function exportReport(mode){
         lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), csvCell(r.kw), r.periods, r.prevSpend.toFixed(2), r.prevRoi.toFixed(2), r.lastSpend.toFixed(2), r.lastRoi.toFixed(2), r.chg.toFixed(1)].join(','));
       }
       download('关键词分析_周期下滑_报告.csv', '\ufeff' + lines.join('\n'));
+      toast('📥 报告已下载(' + ar.length + ' 行)');
+    }else if(anomalyMode==='noRev7'){
+      const ar = buildNoRev7Analysis();
+      const header = ['负责人','品类','计划名字','关键词','近7天消耗','点击量','订单量','购物车数','日期区间'];
+      const lines = [header.join(',')];
+      for(const r of ar){
+        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), csvCell(r.kw), r.spend.toFixed(2), r.clicks, r.orders, r.cart, r.from+'~'+r.to].join(','));
+      }
+      download('关键词分析_7天无成交_报告.csv', '\ufeff' + lines.join('\n'));
       toast('📥 报告已下载(' + ar.length + ' 行)');
     }else{
       const ar = buildCatRoiAnalysis();
