@@ -220,7 +220,7 @@
       <div id="filter-empty" class="empty hidden">请先导入数据</div>
     </div>
     <div class="card hidden" id="filter-result-card">
-      <div class="card-title">🔎 筛选结果 <span class="muted" id="filter-hint"></span></div>
+      <div class="card-title" style="display:none">🔎 筛选结果 <span class="muted" id="filter-hint"></span></div>
       <div class="stats-grid" id="filter-stats"></div>
       <div id="filter-body"></div>
       <div class="pager" id="filter-pager"></div>
@@ -235,8 +235,8 @@
     </div>
     <div class="card">
       <div class="filter-bar">
-        <button class="btn btn-ghost btn-sm" id="a-mode-cat" onclick="setAnomalyMode('cat')">📉 低于品类均值</button>
-        <button class="btn btn-ghost btn-sm" id="a-mode-slide" onclick="setAnomalyMode('slide')">📉 近7天下滑</button>
+        <button class="btn btn-ghost btn-sm" id="a-mode-cat" onclick="setAnomalyMode('cat')">📉 ROI低于品类均值</button>
+        <button class="btn btn-ghost btn-sm" id="a-mode-slide" onclick="setAnomalyMode('slide')">📉 近7天ROI下滑</button>
         <button class="btn btn-ghost btn-sm" id="a-mode-norev" onclick="setAnomalyMode('noRev7')">📉 近7天消耗无成交</button>
       </div>
     </div>
