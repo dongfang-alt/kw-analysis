@@ -106,6 +106,8 @@
   .cmp-row{display:flex;gap:6px;align-items:center;}
   .cmp-row select{width:66px;min-width:66px;}
   .cmp-row input{width:110px;min-width:110px;}
+  .filter-item.row{flex-direction:row;align-items:center;gap:8px;}
+  .filter-bar.spaced{gap:28px;}
   /* 分页条 */
   .pager{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:#64748B;}
   .pager button[disabled]{opacity:.4;cursor:not-allowed;}
@@ -209,11 +211,10 @@
       <div class="card-title">🎛 筛选条件</div>
       <!-- 自定义指标筛选: 三指标拆出, 可同时筛选 -->
       <div class="filter-section">
-        <div class="filter-section-title">⚙️ 自定义选项 · 指标筛选</div>
-        <div class="filter-bar">
-          <div class="filter-item"><label>消耗</label><div class="cmp-row"><select id="f-op-spend" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-spend" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
-          <div class="filter-item"><label>点击量</label><div class="cmp-row"><select id="f-op-clicks" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-clicks" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
-          <div class="filter-item"><label>总ROI</label><div class="cmp-row"><select id="f-op-roi" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-roi" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
+        <div class="filter-bar spaced">
+          <div class="filter-item row"><label>消耗</label><div class="cmp-row"><select id="f-op-spend" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-spend" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
+          <div class="filter-item row"><label>点击量</label><div class="cmp-row"><select id="f-op-clicks" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-clicks" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
+          <div class="filter-item row"><label>总ROI</label><div class="cmp-row"><select id="f-op-roi" onchange="applyFilter()"><option value="gte">≥</option><option value="lte">≤</option></select><input id="f-val-roi" type="number" placeholder="数值..." oninput="applyFilter()"></div></div>
         </div>
       </div>
       <div id="filter-empty" class="empty hidden">请先导入数据</div>
@@ -234,9 +235,9 @@
     </div>
     <div class="card">
       <div class="filter-bar">
-        <button class="btn btn-ghost btn-sm" id="a-mode-slide" onclick="setAnomalyMode('slide')">📉 周期下滑 · 7天为一周期持续下滑</button>
-        <button class="btn btn-ghost btn-sm" id="a-mode-cat" onclick="setAnomalyMode('cat')">📉 低于品类均值 · 关键词ROI &lt; 品类汇总ROI</button>
-        <button class="btn btn-ghost btn-sm" id="a-mode-norev" onclick="setAnomalyMode('noRev7')">📉 7天无成交 · 近7天消耗无成交</button>
+        <button class="btn btn-ghost btn-sm" id="a-mode-cat" onclick="setAnomalyMode('cat')">📉 低于品类均值</button>
+        <button class="btn btn-ghost btn-sm" id="a-mode-slide" onclick="setAnomalyMode('slide')">📉 近7天下滑</button>
+        <button class="btn btn-ghost btn-sm" id="a-mode-norev" onclick="setAnomalyMode('noRev7')">📉 近7天消耗无成交</button>
       </div>
     </div>
     <div id="anomaly-empty" class="empty hidden">请先导入数据</div>
