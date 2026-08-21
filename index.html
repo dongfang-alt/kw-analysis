@@ -1422,7 +1422,7 @@ function buildCatRoiAnalysis(){
   results.sort((a,b)=> (a.kwRoi - a.catRoi) - (b.kwRoi - b.catRoi));   // 差距最大(最差)在前
   return results;
 }
-// 7天无成交: 取数据源最新日期往前7天, 筛出近7天有消耗、且从未成交(全期无成交)的关键词
+// 7天无成交: 取数据源最新日期往前7天, 筛出近7天有消耗但近7天无成交的关键词(只看近7天)
 function buildNoRev7Analysis(){
   const items = dateFilteredItems();
   let maxDate = '';
@@ -1443,7 +1443,7 @@ function buildNoRev7Analysis(){
   }
   const results = [];
   for(const [kw, k] of kwMap){
-    if(!(k.wSpend > 0) || k.wRev > 0 || k.rev > 0) continue;   // 近7天有消耗 + 近7天无成交 + 从未成交(全期无成交)
+    if(!(k.wSpend > 0) || k.wRev > 0) continue;   // 近7天有消耗 + 近7天无成交(只看近7天, 不限制全期)
     results.push({kw,
       owner: topValue(k.ownerMap,true)||'未分配',
       cat: topValue(k.catMap,true)||'未分配',
