@@ -1466,7 +1466,7 @@ function anomalyToolsHtml(mode){
     return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('periods','周期数')}</td><td>${sortBtn('prevSpend','上周期消耗')}</td><td>${sortBtn('prevRoi','上周期ROI')}</td><td>${sortBtn('lastSpend','最近周期消耗')}</td><td>${sortBtn('lastRoi','最近周期ROI')}</td><td>${sortBtn('chg','环比')}</td>`;
   }
   if(mode==='noRev7'){
-    return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','近7天消耗')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cart','购物车数')}</td><td>${sortBtn('totalRev','总成交金额')}</td>`;
+    return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('spend','近7天消耗')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cart','购物车数')}</td><td>${sortBtn('cartcost','加购成本')}</td><td>${sortBtn('totalRev','总成交金额')}</td>`;
   }
   return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('kwRoi','关键词ROI')}</td><td>${sortBtn('catRoi','品类汇总ROI')}</td><td>${sortBtn('diff','差值')}</td><td>${sortBtn('spend','总消耗')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('cpc','CPC')}</td><td>${sortBtn('cartcost','加购成本')}</td>`;
 }
@@ -1590,7 +1590,7 @@ function renderAnomaly(){
     }).join('');
   }else if(anomalyMode==='noRev7'){
     trs = slice.map(r=>{
-      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num roi-bad">${fmtInt(r.spend)}</td><td class="num">${fmtInt(r.clicks)}</td><td class="num">${fmt(calcCpc(r.spend,r.clicks))}</td><td class="num">${fmtInt(r.cart)}</td><td class="num">${fmtInt(r.totalRev)}</td></tr>`;
+      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num roi-bad">${fmtInt(r.spend)}</td><td class="num">${fmtInt(r.clicks)}</td><td class="num">${fmt(calcCpc(r.spend,r.clicks))}</td><td class="num">${fmtInt(r.cart)}</td><td class="num">${fmt(calcCartCost(r.spend,r.cart))}</td><td class="num">${fmtInt(r.totalRev)}</td></tr>`;
     }).join('');
   }else{
     trs = slice.map(r=>{
@@ -1686,10 +1686,10 @@ function exportReport(mode){
       toast('📥 报告已下载(' + ar.length + ' 行)');
     }else if(anomalyMode==='noRev7'){
       const ar = buildNoRev7Analysis();
-      const header = ['负责人','品类','计划名字','关键词','近7天消耗','点击量','CPC','购物车数','总成交金额','日期区间'];
+      const header = ['负责人','品类','计划名字','关键词','近7天消耗','点击量','CPC','购物车数','加购成本','总成交金额','日期区间'];
       const lines = [header.join(',')];
       for(const r of ar){
-        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), csvCell(r.kw), r.spend.toFixed(2), r.clicks, calcCpc(r.spend,r.clicks).toFixed(2), r.cart, r.totalRev.toFixed(2), r.from+'~'+r.to].join(','));
+        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), csvCell(r.kw), r.spend.toFixed(2), r.clicks, calcCpc(r.spend,r.clicks).toFixed(2), r.cart, calcCartCost(r.spend,r.cart).toFixed(2), r.totalRev.toFixed(2), r.from+'~'+r.to].join(','));
       }
       download('关键词分析_7天无成交_报告.csv', '\ufeff' + lines.join('\n'));
       toast('📥 报告已下载(' + ar.length + ' 行)');
