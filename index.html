@@ -1525,36 +1525,25 @@ function renderAnomaly(){
     renderPager('anomaly-pager', 'anomaly', 0);
     return;
   }
-  // KPI 统计
-  if(anomalyMode==='slide'){
-    let spend=0, rev=0;
-    for(const r of rows){ spend+=r.agg.spend; rev+=r.agg.rev; }
-    const catSet = new Set(rows.map(r=>r.cat));
-    statsBox.innerHTML = [
-      ['下滑关键词', fmtInt(rows.length), 'primary'],
-      ['涉及品类', fmtInt(catSet.size), ''],
-      ['总消耗', fmtInt(spend), ''],
-      ['总成交', fmtInt(rev), ''],
-      ['总ROI', fmt(calcRoi(rev,spend)), roiClass(calcRoi(rev,spend))]
-    ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
-  }else if(anomalyMode==='noRev7'){
-    let spend=0, clicks=0, cart=0;
-    for(const r of rows){ spend+=r.spend; clicks+=r.clicks; cart+=r.cart; }
-    const catSet = new Set(rows.map(r=>r.cat));
-    statsBox.innerHTML = [
-      ['无成交关键词', fmtInt(rows.length), 'primary'],
-      ['涉及品类', fmtInt(catSet.size), ''],
-      ['近7天消耗', fmtInt(spend), ''],
-      ['点击量', fmtInt(clicks), ''],
-      ['购物车数', fmtInt(cart), '']
-    ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+  // KPI 统计 —— 三个模式统一 8 指标: 异常关键词/涉及品类/总消耗/总成交/总ROI/点击量/CPC/加购成本
+  let spend=0, rev=0, clicks=0, cart=0;
+  if(anomalyMode==='noRev7'){
+    for(const r of rows){ spend+=r.spend; rev+=r.totalRev; clicks+=r.clicks; cart+=r.cart; }
   }else{
-    const catSet = new Set(rows.map(r=>r.cat));
-    statsBox.innerHTML = [
-      ['异常关键词', fmtInt(rows.length), 'primary'],
-      ['涉及品类', fmtInt(catSet.size), '']
-    ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
+    for(const r of rows){ spend+=r.agg.spend; rev+=r.agg.rev; clicks+=r.agg.clicks; cart+=r.agg.cart; }
   }
+  const catSet = new Set(rows.map(r=>r.cat));
+  const roi = calcRoi(rev, spend);
+  statsBox.innerHTML = [
+    ['异常关键词', fmtInt(rows.length), 'primary'],
+    ['涉及品类', fmtInt(catSet.size), ''],
+    ['总消耗', fmtInt(spend), ''],
+    ['总成交', fmtInt(rev), ''],
+    ['总ROI', fmt(roi), roiClass(roi)],
+    ['点击量', fmtInt(clicks), ''],
+    ['CPC', fmt(calcCpc(spend, clicks)), ''],
+    ['加购成本', fmt(calcCartCost(spend, cart)), '']
+  ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
   // 表头排序 —— 与整体数据样式一致
   const ANOMALY_SORT_LABEL = {periods:'周期数', prevSpend:'上周期消耗', prevRoi:'上周期ROI', lastSpend:'最近周期消耗', lastRoi:'最近周期ROI', chg:'环比', kwRoi:'关键词ROI', catRoi:'品类汇总ROI', diff:'差值', spend:'总消耗', cpc:'CPC', cartcost:'加购成本', clicks:'点击量', orders:'订单量', cart:'购物车数', totalRev:'总成交金额', roi:'总ROI'};
   function sortVal(r, col){
