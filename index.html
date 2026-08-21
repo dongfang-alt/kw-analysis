@@ -1365,7 +1365,11 @@ function buildSlideAnalysis(){
     for(const it of list) for(const k of AGG_KEYS) agg[k] += it[k];
     const lastP = periods.get(keys[keys.length-1]);
     const prevP = periods.get(keys[keys.length-2]);
+    const lastSpend = lastP.spend, prevSpend = prevP.spend;
+    const lastRoi = calcRoi(lastP.rev, lastP.spend), prevRoi = calcRoi(prevP.rev, prevP.spend);
+    const chg = prevRoi ? (lastRoi - prevRoi)/prevRoi*100 : (lastRoi ? -100 : 0);
     results.push({kw, owner:list[0].owner, cat:list[0].cat, plan:list[0].plan, periods:keys.length,
+      lastSpend, prevSpend, lastRoi, prevRoi, chg,
       lastRev:lastP.rev, prevRev:prevP.rev, agg});
   }
   return results;
@@ -1403,7 +1407,7 @@ function anomalyToolsHtml(mode){
     return `<button class="tbl-sort${active}" onclick="toggleAnomalySort('${col}')">${label}<span class="arrow">${arrow}</span></button>`;
   };
   if(mode==='slide'){
-    return `<td>${sIn('kw','搜关键词')}</td><td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sortBtn('periods','周期数')}</td><td>${sortBtn('lastRev','最近周期成交')}</td><td>${sortBtn('prevRev','上周期成交')}</td><td>${sortBtn('chg','环比')}</td><td>${sortBtn('rev','总成交')}</td><td>${sortBtn('spend','总消耗')}</td><td>${sortBtn('roi','总ROI')}</td>`;
+    return `<td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sIn('kw','搜关键词')}</td><td>${sortBtn('periods','周期数')}</td><td>${sortBtn('prevSpend','上周期消耗')}</td><td>${sortBtn('prevRoi','上周期ROI')}</td><td>${sortBtn('lastSpend','最近周期消耗')}</td><td>${sortBtn('lastRoi','最近周期ROI')}</td><td>${sortBtn('chg','环比')}</td>`;
   }
   return `<td>${sIn('kw','搜关键词')}</td><td>${sIn('owner','搜负责人')}</td><td>${sIn('cat','搜品类')}</td><td>${sIn('plan','搜计划')}</td><td>${sortBtn('kwRoi','关键词ROI')}</td><td>${sortBtn('catRoi','品类汇总ROI')}</td><td>${sortBtn('diff','差值')}</td><td>${sortBtn('spend','总消耗')}</td><td>${sortBtn('rev','总成交')}</td><td>${sortBtn('clicks','点击量')}</td><td>${sortBtn('orders','订单量')}</td>`;
 }
@@ -1482,12 +1486,14 @@ function renderAnomaly(){
     ].map(([l,v,c])=>`<div class="stat-card"><div class="label">${l}</div><div class="value ${c}">${v}</div></div>`).join('');
   }
   // 表头排序 —— 与整体数据样式一致
-  const ANOMALY_SORT_LABEL = {periods:'周期数', lastRev:'最近周期成交', prevRev:'上周期成交', chg:'环比', kwRoi:'关键词ROI', catRoi:'品类汇总ROI', diff:'差值', spend:'总消耗', rev:'总成交', clicks:'点击量', orders:'订单量', roi:'总ROI'};
+  const ANOMALY_SORT_LABEL = {periods:'周期数', prevSpend:'上周期消耗', prevRoi:'上周期ROI', lastSpend:'最近周期消耗', lastRoi:'最近周期ROI', chg:'环比', kwRoi:'关键词ROI', catRoi:'品类汇总ROI', diff:'差值', spend:'总消耗', rev:'总成交', clicks:'点击量', orders:'订单量', roi:'总ROI'};
   function sortVal(r, col){
     if(col==='periods') return r.periods;
-    if(col==='lastRev') return r.lastRev;
-    if(col==='prevRev') return r.prevRev;
-    if(col==='chg') return r.prevRev ? (r.lastRev - r.prevRev)/r.prevRev*100 : (r.lastRev ? -100 : 0);
+    if(col==='prevSpend') return r.prevSpend;
+    if(col==='prevRoi') return r.prevRoi;
+    if(col==='lastSpend') return r.lastSpend;
+    if(col==='lastRoi') return r.lastRoi;
+    if(col==='chg') return r.chg;
     if(col==='kwRoi') return r.kwRoi;
     if(col==='catRoi') return r.catRoi;
     if(col==='diff') return r.kwRoi - r.catRoi;
@@ -1515,8 +1521,8 @@ function renderAnomaly(){
   let trs;
   if(anomalyMode==='slide'){
     trs = slice.map(r=>{
-      const chg = r.prevRev ? (r.lastRev - r.prevRev)/r.prevRev*100 : (r.lastRev ? -100 : 0);
-      return `<tr><td class="lv-name">${esc(r.kw)}</td><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="num">${r.periods}</td><td class="num">${fmt(r.lastRev)}</td><td class="num">${fmt(r.prevRev)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td><td class="num">${fmtInt(r.agg.rev)}</td><td class="num">${fmtInt(r.agg.spend)}</td><td class="num ${roiClass(calcRoi(r.agg.rev,r.agg.spend))}">${fmt(calcRoi(r.agg.rev,r.agg.spend))}</td></tr>`;
+      const chg = r.chg;
+      return `<tr><td class="lv-dim">${esc(r.owner)}</td><td class="lv-dim">${esc(r.cat)}</td><td class="lv-dim">${esc(r.plan)||'—'}</td><td class="lv-name">${esc(r.kw)}</td><td class="num">${r.periods}</td><td class="num">${fmtInt(r.prevSpend)}</td><td class="num ${roiClass(r.prevRoi)}">${fmt(r.prevRoi)}</td><td class="num">${fmtInt(r.lastSpend)}</td><td class="num ${roiClass(r.lastRoi)}">${fmt(r.lastRoi)}</td><td class="num ${chg<0?'roi-bad':''}">${fmt(chg,1)}%</td></tr>`;
     }).join('');
   }else{
     trs = slice.map(r=>{
@@ -1601,11 +1607,10 @@ function exportReport(mode){
   if(mode === 'anomaly'){
     if(anomalyMode==='slide'){
       const ar = buildSlideAnalysis();
-      const header = ['关键词','负责人','品类','计划名字','周期数','最近周期成交','上周期成交','环比(%)','总成交','总消耗','总ROI'];
+      const header = ['负责人','品类','计划名字','关键词','周期数','上周期消耗','上周期ROI','最近周期消耗','最近周期ROI','环比(%)'];
       const lines = [header.join(',')];
       for(const r of ar){
-        const chg = r.prevRev ? ((r.lastRev - r.prevRev)/r.prevRev*100).toFixed(1) : '-100.0';
-        lines.push([csvCell(r.kw), csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), r.periods, r.lastRev.toFixed(2), r.prevRev.toFixed(2), chg, r.agg.rev.toFixed(2), r.agg.spend.toFixed(2), calcRoi(r.agg.rev,r.agg.spend).toFixed(2)].join(','));
+        lines.push([csvCell(r.owner), csvCell(r.cat), csvCell(r.plan), csvCell(r.kw), r.periods, r.prevSpend.toFixed(2), r.prevRoi.toFixed(2), r.lastSpend.toFixed(2), r.lastRoi.toFixed(2), r.chg.toFixed(1)].join(','));
       }
       download('关键词分析_周期下滑_报告.csv', '\ufeff' + lines.join('\n'));
       toast('📥 报告已下载(' + ar.length + ' 行)');
